@@ -13,14 +13,22 @@ function backup-adffactory($sub, $rg, $adf, $outputfile)
     $json | out-file $outputfile
 }
 
-function deploy-adffactory($sub, $rg, $adf, $inputfile)
+function deploy-adffactory($sub, $rg, $adf, $inputfile, $region = "", $suffix = "")
 {
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$($adf)?api-version=2018-06-01"
    Write-Host "Callling REST method: $uri"
    $token = (az account get-access-token | convertfrom-json).accessToken
 
    $template = (get-content -Path $inputfile | convertfrom-json)
-   $template.name = $adf
+
+   if($suffix -ne "")
+   {
+        $template.name = "$($adf)$($suffix)"
+   }
+   else
+   {
+        $template.name = $adf
+   }
 
    #This is required because if you are creating from scratch, it needs to be blank (creates a new MSI)
    #TODO:  Check and see if already exists.  This is not desirable when it already exists.
@@ -28,6 +36,12 @@ function deploy-adffactory($sub, $rg, $adf, $inputfile)
    {
         $template.identity.principalId = $null
         $template.identity.tenantId = $null
+   }
+
+   #restore to different region
+   if($region -ne "")
+   {
+        $template.location = $region
    }
 
    #This bit enables cross-subscription restore
@@ -62,6 +76,36 @@ function backup-adflinkedservice($sub, $rg, $adf, $linkedservice, $outputfile)
 function deploy-adflinkedservice($sub, $rg, $adf, $linkedservice, $inputfile)
 {
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/linkedservices/$($linkedservice)?api-version=2018-06-01"
+   Write-Host "Callling REST method: $uri"
+   $token = (az account get-access-token | convertfrom-json).accessToken
+
+   $body = get-content -Path $inputfile
+
+   $headers = @{}
+   $headers["Authorization"] = "Bearer $token"
+
+   #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
+   Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
+}
+
+function backup-adfdataflow($sub, $rg, $adf, $dataflow, $outputfile)
+{
+    Write-Host "Starting backup of linked service $linkedservice in factory $adf in resource group $rg"
+    # Get the pipeline via AZ CLI - gives us the cleanest JSON
+    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/dataFlows/$($dataflow)?api-version=2018-06-01"
+    Write-Host "Callling REST method: $uri"
+    $json = az rest --uri $uri --method get 
+
+    <# We can use this verbatim - no fixup needed.
+    
+    There's some extra stuff in the JSON, like ETAG, modified time, etc.  But this gets stripped when you publish it.  
+    Meanwhile, it's data which is useful in source control as forensic/historical info.#>
+    $json | out-file $outputfile
+}
+
+function deploy-adfdataflow($sub, $rg, $adf, $dataflow, $inputfile)
+{
+   $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/dataFlows/$($dataflow)?api-version=2018-06-01"
    Write-Host "Callling REST method: $uri"
    $token = (az account get-access-token | convertfrom-json).accessToken
 
@@ -202,6 +246,14 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
             }
         }
 
+        #backup dataflows
+        Write-Host "Command Running: az datafactory dataset list --resource-group $resourceGroup --factory-name $($factory.name)"
+        foreach($dataset in (az datafactory dataflows list --resource-group $resourceGroup --factory-name $factory.name | convertfrom-json))
+        {
+       
+            backup-adfdataset -sub $subscription -rg $resourceGroup -adf $factory.name -dataset $dataset.name -outputfile "$srcfolder\$($factory.name)\datasets\$($dataset.name).json"
+        }
+
         #backup datasets
         Write-Host "Command Running: az datafactory dataset list --resource-group $resourceGroup --factory-name $($factory.name)"
         foreach($dataset in (az datafactory dataset list --resource-group $resourceGroup --factory-name $factory.name | convertfrom-json))
@@ -225,7 +277,7 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
 }
 
 
-function restore-factories($sub, $rg, $srcfolder, $suffix = "")
+function restore-factories($sub, $rg, $srcfolder, $suffix = "", $region = "")
 {
     Write-Host "Restore factories running on sub: $sub with RG: $resourceGroup with source folder: $srcfolder"
     $srcdir = get-item -Path $srcfolder
@@ -237,7 +289,7 @@ function restore-factories($sub, $rg, $srcfolder, $suffix = "")
         try
         {
             #suffix is included here to ensure the ADF name is unique globally.  Backup and restore won't work if you haven't deleted the source factory otherwise.
-            deploy-adffactory -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -inputfile "$($factory.FullName)\$($factory.Name).json" -suffix $suffix
+            deploy-adffactory -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -inputfile "$($factory.FullName)\$($factory.Name).json" -suffix $suffix -region $region
         }
         catch
         {
@@ -265,3 +317,20 @@ function restore-factories($sub, $rg, $srcfolder, $suffix = "")
         }
     }
 }
+
+#if you don't have it - your pipeline will hang on the az cli commands in Powershell ISE, and outright fail on the shell.
+az extension add --name datafactory --yes
+
+
+$subscription = "e36582a6-9e0c-4644-9b78-592ffe29a705"
+$resourceGroup = "DefaultResourceGroup-EUS2"
+$srcfolder = "c:\projects\adfbackup"
+
+az account set -s $subscription
+
+#backup-factories -sub $subscription -resourceGroup $resourceGroup -srcfolder $srcfolder -filter $true -lookbackMonths 1
+
+restore-factories -sub $subscription -resourceGroup $resourceGroup -srcfolder $srcfolder -suffix "-new" #-region "eastus2"
+
+
+
