@@ -45,7 +45,7 @@ function deploy-adffactory($sub, $rg, $adf, $inputfile, $region = "", $suffix = 
    }
 
    #This bit enables cross-subscription restore
-   $template.id = "/subscriptions/$sub/resourceGroups/$rg/providers/Microsoft.DataFactory/factories/$adf"
+   $template.id = "/subscriptions/$sub/resourceGroups/$rg/providers/Microsoft.DataFactory/factories/$adf$($suffix)"
 
    $body = $template | convertto-json
 
@@ -327,10 +327,15 @@ $resourceGroup = "DefaultResourceGroup-EUS2"
 $srcfolder = "c:\projects\adfbackup"
 
 az account set -s $subscription
-
+#backup works great!
 #backup-factories -sub $subscription -resourceGroup $resourceGroup -srcfolder $srcfolder -filter $true -lookbackMonths 1
 
-restore-factories -sub $subscription -resourceGroup $resourceGroup -srcfolder $srcfolder -suffix "-new" #-region "eastus2"
+#Restore works great!
+restore-factories -sub $subscription -resourceGroup $resourceGroup -srcfolder $srcfolder -suffix "-new" -region "eastus2"
 
 
+
+#bob's your uncle.  Get the lastUpdated value from the run, and that's your runtime.  Validate this on Ravi's setup?
+
+#check-pipelinelastrun -adf TDDemoGit -rg $resourceGroup -pipeline 126DemoTDGitTest -months 1
 
