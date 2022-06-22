@@ -1,10 +1,34 @@
+function log($msg, $foregroundcolor = "white")
+{
+    Write-Host $msg -ForegroundColor $foregroundcolor
+    "$(get-date): $msg" | Out-File -FilePath "$($pwd.Path)\adfbcdr.log" -Append
+}
+
+function run-azcmd($cmd, $deserialize = $true)
+{
+    log "Command Running: $cmd"
+    $scriptblock = {$cmd}
+    $result = iex $cmd 2>&1
+    if($LASTEXITCODE -gt 0)
+    {
+        #somehow get the stdout of invoke-command, log it.
+        log $Error[0] -ForegroundColor Red
+        throw $Error[0]
+    }
+    switch($deserialize)
+    {
+        $true {return ($result | convertfrom-json)}
+        $false {return $result}
+    }
+}
+
 function backup-adffactory($sub, $rg, $adf, $outputfile)
 {
     log "Starting backup of factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$($adf)?api-version=2018-06-01"
-    log "Callling REST method: $uri"
-    $json = az rest --uri $uri --method get 
+
+    $json = run-azcmd "az rest --uri $uri --method get" -deserialize $false
 
     <# We can use this verbatim - no fixup needed.
     
@@ -16,8 +40,8 @@ function backup-adffactory($sub, $rg, $adf, $outputfile)
 function deploy-adffactory($sub, $rg, $adf, $inputfile, $region = "")
 {
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$($adf)?api-version=2018-06-01"
-   log "Callling REST method: $uri"
-   $token = (az account get-access-token | convertfrom-json).accessToken
+
+   $token = (run-azcmd "az account get-access-token").accessToken
 
    $template = (get-content -Path $inputfile | convertfrom-json)
 
@@ -47,7 +71,7 @@ function deploy-adffactory($sub, $rg, $adf, $inputfile, $region = "")
    $headers = @{}
    $headers["Authorization"] = "Bearer $token"
    $headers["Content-Type"] = "application/json"
-
+   log "Callling REST method: $uri"
    #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
 }
@@ -58,8 +82,8 @@ function backup-adflinkedservice($sub, $rg, $adf, $linkedservice, $outputfile)
     log "Starting backup of linked service $linkedservice in factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/linkedservices/$($linkedservice)?api-version=2018-06-01"
-    log "Callling REST method: $uri"
-    $json = az rest --uri $uri --method get 
+
+    $json = run-azcmd "az rest --uri $uri --method get" -deserialize $false
 
     <# We can use this verbatim - no fixup needed.
     
@@ -72,14 +96,14 @@ function deploy-adflinkedservice($sub, $rg, $adf, $linkedservice, $inputfile)
 {
    log "Starting restore of linked service $linkedservice in factory $adf in resource group $rg"
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/linkedservices/$($linkedservice)?api-version=2018-06-01"
-   log "Callling REST method: $uri"
-   $token = (az account get-access-token | convertfrom-json).accessToken
+
+   $token = (run-azcmd "az account get-access-token").accessToken
 
    $body = get-content -Path $inputfile
 
    $headers = @{}
    $headers["Authorization"] = "Bearer $token"
-
+   log "Callling REST method: $uri"
    #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
 }
@@ -89,8 +113,8 @@ function backup-adfdataflow($sub, $rg, $adf, $dataflow, $outputfile)
     log "Starting backup of data flow $dataflow in factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/dataFlows/$($dataflow)?api-version=2018-06-01"
-    log "Callling REST method: $uri"
-    $json = az rest --uri $uri --method get 
+
+    $json = run-azcmd "az rest --uri $uri --method get" -deserialize $false
 
     <# We can use this verbatim - no fixup needed.
     
@@ -103,14 +127,15 @@ function deploy-adfdataflow($sub, $rg, $adf, $dataflow, $inputfile)
 {
    log "Starting restore of data flow $dataflow in factory $adf in resource group $rg"
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/dataFlows/$($dataflow)?api-version=2018-06-01"
-   log "Callling REST method: $uri"
-   $token = (az account get-access-token | convertfrom-json).accessToken
+
+   $token = (run-azcmd "az account get-access-token").accessToken
 
    $body = get-content -Path $inputfile
 
    $headers = @{}
    $headers["Authorization"] = "Bearer $token"
 
+   log "Callling REST method: $uri"
    #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
 }
@@ -121,8 +146,8 @@ function backup-adfdataset($sub, $rg, $adf, $dataset, $outputfile)
     log "Starting backup of dataset $dataset in factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/datasets/$($dataset)?api-version=2018-06-01"
-    log "Callling REST method: $uri"
-    $json = az rest --uri $uri --method get 
+
+    $json = run-azcmd "az rest --uri $uri --method get" -deserialize $false
 
     <# We can use this verbatim - no fixup needed.
     
@@ -135,14 +160,15 @@ function deploy-adfdataset($sub, $rg, $adf, $dataset, $inputfile)
 {
    log "Starting deploy of data set $dataset in factory $adf in resource group $rg"
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/datasets/$($dataset)?api-version=2018-06-01"
-   log "Callling REST method: $uri"
-   $token = (az account get-access-token | convertfrom-json).accessToken
+
+   $token = (run-azcmd "az account get-access-token").accessToken
 
    $body = get-content -Path $inputfile
 
    $headers = @{}
    $headers["Authorization"] = "Bearer $token"
 
+   log "Callling REST method: $uri"
    #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
 }
@@ -153,9 +179,9 @@ function backup-adfpipeline($sub, $rg, $adf, $pipeline, $outputfile)
     log "Starting backup of pipeline $pipeline in factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01"
-    log "Callling REST method: $uri"
+
     #"https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.DataFactory/factories/{factoryName}/pipelines/{pipelineName}?api-version=2018-06-01"
-    $json = az rest --uri $uri --method get 
+    $json = run-azcmd "az rest --uri $uri --method get"  -deserialize $false
 
     <# We can use this verbatim - no fixup needed.
     
@@ -168,13 +194,13 @@ function deploy-adfpipeline($sub, $rg, $adf, $pipeline, $inputfile)
 {
    log "Starting restore of pipeline $pipeline in factory $adf in resource group $rg"
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01"
-   log "Callling REST method: $uri"
-   $token = (az account get-access-token | convertfrom-json).accessToken
+   $token = (run-azcmd "az account get-access-token").accessToken
 
    $body = get-content -Path $inputfile
    $headers = @{}
    $headers["Authorization"] = "Bearer $token"
 
+   log "Callling REST method: $uri"
    #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
 }
@@ -208,7 +234,7 @@ function check-pipelinelastrun($adf, $rg, $pipeline, [int]$months = 8)
     $todayDateStamp = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH\:mm\:ss.fffffffZ")  #az datafactory command expects ISO8601 timestamp format
     $oldDateStamp = "2015-01-01T00:00:00.00Z"  #predates ARM, should be safe as a baseline date range.
 
-    $runs = az datafactory pipeline-run query-by-factory --resource-group $rg --factory-name $adf --last-updated-after $oldDateStamp --last-updated-before $todayDateStamp --filters operand="PipelineName" operator="Equals" values="$pipeline" | convertfrom-json
+    $runs = run-azcmd "az datafactory pipeline-run query-by-factory --resource-group $rg --factory-name $adf --last-updated-after $oldDateStamp --last-updated-before $todayDateStamp --filters operand=`"PipelineName`" operator=`"Equals`" values=`"$pipeline`""
     
     log "Pipeline $pipeline has this many runs: $($runs.Value.Count)"
     if($runs.Value.Count -gt 0)
@@ -227,8 +253,7 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
 {
 
     log "Backup factories running on sub: $sub with RG: $resourceGroup with source folder: $srcfolder"
-    log "Executing command: az resource list --resource-group $resourceGroup --resource-type `"Microsoft.Datafactory/factories`""
-    $factories = (az resource list --resource-group $resourceGroup --resource-type "Microsoft.Datafactory/factories") | convertfrom-json
+    $factories = (run-azcmd "az resource list --resource-group $resourceGroup --resource-type `"Microsoft.Datafactory/factories`"")
     foreach($factory in $factories)
     {
         log "Starting backup of Factory $($factory.name) in resource group $resourceGroup"
@@ -237,8 +262,7 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
         ensure-adfdirectory -srcpath "$srcfolder\$($factory.name)"
 
         #backup pipelines first
-        log "Command Running: az datafactory pipeline list --resource-group $resourceGroup --factory-name $($factory.name)"
-        foreach($pipeline in (az datafactory pipeline list --resource-group $resourceGroup --factory-name $factory.name | convertfrom-json))
+        foreach($pipeline in (run-azcmd "az datafactory pipeline list --resource-group $resourceGroup --factory-name $($factory.name)"))
         {
             #Don't back up if not run in last X months...
             if(($Filter -and (check-pipelinelastrun -adf $factory.name -rg $resourceGroup -pipeline $pipeline.name -months $lookbackMonths)) -or !($Filter)) 
@@ -250,24 +274,21 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
 
         #backup dataflows
         $dataflowuri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/dataflows?api-version=2018-06-01"
-        log "Command Running: az rest --uri $dataflowuri --method get"
-        foreach($dataflow in ((az rest --uri $dataflowuri --method get) | convertfrom-json).value)
+        foreach($dataflow in ((run-azcmd "az rest --uri $dataflowuri --method get").value))
         {
             log "Found data flow: $($dataflow.name)" -ForegroundColor Green
             backup-adfdataflow -sub $subscription -rg $resourceGroup -adf $factory.name -dataflow $dataflow.name -outputfile "$srcfolder\$($factory.name)\dataflows\$($dataflow.name).json"
         }
 
         #backup datasets
-        log "Command Running: az datafactory dataset list --resource-group $resourceGroup --factory-name $($factory.name)"
-        foreach($dataset in (az datafactory dataset list --resource-group $resourceGroup --factory-name $factory.name | convertfrom-json))
+        foreach($dataset in (run-azcmd "az datafactory dataset list --resource-group $resourceGroup --factory-name $($factory.name)"))
         {
             log "Found data set: $($dataset.name)" -ForegroundColor Green
             backup-adfdataset -sub $subscription -rg $resourceGroup -adf $factory.name -dataset $dataset.name -outputfile "$srcfolder\$($factory.name)\datasets\$($dataset.name).json"
         }
 
         #backup linked services
-        log "Command running: az datafactory linked-service list --resource-group $resourceGroup --factory-name $($factory.name)"
-        foreach($service in (az datafactory linked-service list --resource-group $resourceGroup --factory-name $factory.name | convertfrom-json))
+        foreach($service in (run-azcmd "az datafactory linked-service list --resource-group $resourceGroup --factory-name $($factory.name)"))
         {
             log "Found linkedservice: $($service.name)" -ForegroundColor Green
             backup-adflinkedservice -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $service.name -outputfile "$srcfolder\$($factory.name)\linkedservices\$($service.name).json"
@@ -277,13 +298,6 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
         backup-adffactory -sub $subscription -rg $resourceGroup -adf $factory.name -outputfile "$srcfolder\$($factory.name)\$($factory.name).json"
     }
 
-}
-
-function log($msg, $foregroundcolor = "white")
-{
-    
-    Write-Host $msg -ForegroundColor $foregroundcolor
-    "$(get-date): $msg" | Out-File -FilePath "$($pwd.Path)\adfbcdr.log" -Append
 }
 
 
@@ -333,8 +347,3 @@ function restore-factories($sub, $rg, $srcfolder, $suffix = "", $region = "")
         }
     }
 }
-
-# if you don't have it - your pipeline will hang on the az cli commands in Powershell ISE, and outright fail on the shell.
-az extension add --name datafactory --yes
-# You also need the Data factory resource provider registered in your sub
-az provider register --namespace "Microsoft.Datafactory"
