@@ -1,9 +1,9 @@
 function backup-adffactory($sub, $rg, $adf, $outputfile)
 {
-    Write-Host "Starting backup of factory $adf in resource group $rg"
+    log "Starting backup of factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$($adf)?api-version=2018-06-01"
-    Write-Host "Callling REST method: $uri"
+    log "Callling REST method: $uri"
     $json = az rest --uri $uri --method get 
 
     <# We can use this verbatim - no fixup needed.
@@ -13,22 +13,17 @@ function backup-adffactory($sub, $rg, $adf, $outputfile)
     $json | out-file $outputfile
 }
 
-function deploy-adffactory($sub, $rg, $adf, $inputfile, $region = "", $suffix = "")
+function deploy-adffactory($sub, $rg, $adf, $inputfile, $region = "")
 {
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$($adf)?api-version=2018-06-01"
-   Write-Host "Callling REST method: $uri"
+   log "Callling REST method: $uri"
    $token = (az account get-access-token | convertfrom-json).accessToken
 
    $template = (get-content -Path $inputfile | convertfrom-json)
 
-   if($suffix -ne "")
-   {
-        $template.name = "$($adf)$($suffix)"
-   }
-   else
-   {
-        $template.name = $adf
-   }
+
+   $template.name = $adf
+
 
    #This is required because if you are creating from scratch, it needs to be blank (creates a new MSI)
    #TODO:  Check and see if already exists.  This is not desirable when it already exists.
@@ -60,10 +55,10 @@ function deploy-adffactory($sub, $rg, $adf, $inputfile, $region = "", $suffix = 
 
 function backup-adflinkedservice($sub, $rg, $adf, $linkedservice, $outputfile)
 {
-    Write-Host "Starting backup of linked service $linkedservice in factory $adf in resource group $rg"
+    log "Starting backup of linked service $linkedservice in factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/linkedservices/$($linkedservice)?api-version=2018-06-01"
-    Write-Host "Callling REST method: $uri"
+    log "Callling REST method: $uri"
     $json = az rest --uri $uri --method get 
 
     <# We can use this verbatim - no fixup needed.
@@ -75,8 +70,9 @@ function backup-adflinkedservice($sub, $rg, $adf, $linkedservice, $outputfile)
 
 function deploy-adflinkedservice($sub, $rg, $adf, $linkedservice, $inputfile)
 {
+   log "Starting restore of linked service $linkedservice in factory $adf in resource group $rg"
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/linkedservices/$($linkedservice)?api-version=2018-06-01"
-   Write-Host "Callling REST method: $uri"
+   log "Callling REST method: $uri"
    $token = (az account get-access-token | convertfrom-json).accessToken
 
    $body = get-content -Path $inputfile
@@ -90,10 +86,10 @@ function deploy-adflinkedservice($sub, $rg, $adf, $linkedservice, $inputfile)
 
 function backup-adfdataflow($sub, $rg, $adf, $dataflow, $outputfile)
 {
-    Write-Host "Starting backup of linked service $linkedservice in factory $adf in resource group $rg"
+    log "Starting backup of data flow $dataflow in factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/dataFlows/$($dataflow)?api-version=2018-06-01"
-    Write-Host "Callling REST method: $uri"
+    log "Callling REST method: $uri"
     $json = az rest --uri $uri --method get 
 
     <# We can use this verbatim - no fixup needed.
@@ -105,8 +101,9 @@ function backup-adfdataflow($sub, $rg, $adf, $dataflow, $outputfile)
 
 function deploy-adfdataflow($sub, $rg, $adf, $dataflow, $inputfile)
 {
+   log "Starting restore of data flow $dataflow in factory $adf in resource group $rg"
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/dataFlows/$($dataflow)?api-version=2018-06-01"
-   Write-Host "Callling REST method: $uri"
+   log "Callling REST method: $uri"
    $token = (az account get-access-token | convertfrom-json).accessToken
 
    $body = get-content -Path $inputfile
@@ -121,10 +118,10 @@ function deploy-adfdataflow($sub, $rg, $adf, $dataflow, $inputfile)
 
 function backup-adfdataset($sub, $rg, $adf, $dataset, $outputfile)
 {
-    Write-Host "Starting backup of dataset $dataset in factory $adf in resource group $rg"
+    log "Starting backup of dataset $dataset in factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/datasets/$($dataset)?api-version=2018-06-01"
-    Write-Host "Callling REST method: $uri"
+    log "Callling REST method: $uri"
     $json = az rest --uri $uri --method get 
 
     <# We can use this verbatim - no fixup needed.
@@ -136,8 +133,9 @@ function backup-adfdataset($sub, $rg, $adf, $dataset, $outputfile)
 
 function deploy-adfdataset($sub, $rg, $adf, $dataset, $inputfile)
 {
+   log "Starting deploy of data set $dataset in factory $adf in resource group $rg"
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/datasets/$($dataset)?api-version=2018-06-01"
-   Write-Host "Callling REST method: $uri"
+   log "Callling REST method: $uri"
    $token = (az account get-access-token | convertfrom-json).accessToken
 
    $body = get-content -Path $inputfile
@@ -152,10 +150,10 @@ function deploy-adfdataset($sub, $rg, $adf, $dataset, $inputfile)
 
 function backup-adfpipeline($sub, $rg, $adf, $pipeline, $outputfile)
 {
-    Write-Host "Starting backup of pipeline $pipeline in factory $adf in resource group $rg"
+    log "Starting backup of pipeline $pipeline in factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01"
-    Write-Host "Callling REST method: $uri"
+    log "Callling REST method: $uri"
     #"https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.DataFactory/factories/{factoryName}/pipelines/{pipelineName}?api-version=2018-06-01"
     $json = az rest --uri $uri --method get 
 
@@ -168,8 +166,9 @@ function backup-adfpipeline($sub, $rg, $adf, $pipeline, $outputfile)
 
 function deploy-adfpipeline($sub, $rg, $adf, $pipeline, $inputfile)
 {
+   log "Starting restore of pipeline $pipeline in factory $adf in resource group $rg"
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01"
-   Write-Host "Callling REST method: $uri"
+   log "Callling REST method: $uri"
    $token = (az account get-access-token | convertfrom-json).accessToken
 
    $body = get-content -Path $inputfile
@@ -185,18 +184,20 @@ function ensure-adfdirectory($srcpath)
     
     if(Test-Path -Path $srcpath)
     {
-        Write-Host "Path is found; trying to verify subfolders under $srcpath"
-        if(!(Test-Path -Path "$srcpath\pipelines")) { Write-Host "Creating pipelines folder..."; new-item -path "$srcpath" -ItemType Directory}
-        if(!(Test-Path -Path "$srcpath\datasets")) { Write-Host "Creating datasets folder..."; new-item -path "$srcpath" -ItemType Directory}
-        if(!(Test-Path -Path "$srcpath\linkedservices")) { Write-Host "Creating linkedservices folder...";new-item -path "$srcpath" -ItemType Directory}
+        log "Path is found; trying to verify subfolders under $srcpath"
+        if(!(Test-Path -Path "$srcpath\pipelines")) { log "Creating pipelines folder..."; new-item -path "$srcpath" -ItemType Directory}
+        if(!(Test-Path -Path "$srcpath\datasets")) { log "Creating datasets folder..."; new-item -path "$srcpath" -ItemType Directory}
+        if(!(Test-Path -Path "$srcpath\linkedservices")) { log "Creating linkedservices folder...";new-item -path "$srcpath" -ItemType Directory}
+        if(!(Test-Path -Path "$srcpath\dataflows")) { log "Creating linkedservices folder...";new-item -path "$srcpath" -ItemType Directory}
     }
     else
     {
-        Write-Host "Creating $srcpath from scratch...";
+        log "Creating $srcpath from scratch...";
         new-item -path "$srcpath" -ItemType Directory
         new-item -path "$srcpath\pipelines" -ItemType Directory
         new-item -path "$srcpath\datasets" -ItemType Directory
         new-item -path "$srcpath\linkedservices" -ItemType Directory
+        new-item -path "$srcpath\dataflows" -ItemType Directory
     }
 }
 
@@ -209,7 +210,7 @@ function check-pipelinelastrun($adf, $rg, $pipeline, [int]$months = 8)
 
     $runs = az datafactory pipeline-run query-by-factory --resource-group $rg --factory-name $adf --last-updated-after $oldDateStamp --last-updated-before $todayDateStamp --filters operand="PipelineName" operator="Equals" values="$pipeline" | convertfrom-json
     
-    Write-Host "Pipeline $pipeline has this many runs: $($runs.Value.Count)"
+    log "Pipeline $pipeline has this many runs: $($runs.Value.Count)"
     if($runs.Value.Count -gt 0)
     {
         $lastRun = [datetime]::parse(($runs.value | Sort-Object -Property runEnd -Descending)[0].runEnd)
@@ -225,48 +226,50 @@ function check-pipelinelastrun($adf, $rg, $pipeline, [int]$months = 8)
 function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $lookbackMonths = 12)
 {
 
-    Write-Host "Backup factories running on sub: $sub with RG: $resourceGroup with source folder: $srcfolder"
-    Write-Host "Executing command: az resource list --resource-group $resourceGroup --resource-type `"Microsoft.Datafactory/factories`""
+    log "Backup factories running on sub: $sub with RG: $resourceGroup with source folder: $srcfolder"
+    log "Executing command: az resource list --resource-group $resourceGroup --resource-type `"Microsoft.Datafactory/factories`""
     $factories = (az resource list --resource-group $resourceGroup --resource-type "Microsoft.Datafactory/factories") | convertfrom-json
     foreach($factory in $factories)
     {
-        Write-Host "Starting backup of Factory $($factory.name) in resource group $resourceGroup"
+        log "Starting backup of Factory $($factory.name) in resource group $resourceGroup"
         
         #make sure all subfolders exist first...
         ensure-adfdirectory -srcpath "$srcfolder\$($factory.name)"
 
         #backup pipelines first
-        Write-Host "Command Running: az datafactory pipeline list --resource-group $resourceGroup --factory-name $($factory.name)"
+        log "Command Running: az datafactory pipeline list --resource-group $resourceGroup --factory-name $($factory.name)"
         foreach($pipeline in (az datafactory pipeline list --resource-group $resourceGroup --factory-name $factory.name | convertfrom-json))
         {
-            #Don't back up if not run in last 12 months...
+            #Don't back up if not run in last X months...
             if(($Filter -and (check-pipelinelastrun -adf $factory.name -rg $resourceGroup -pipeline $pipeline.name -months $lookbackMonths)) -or !($Filter)) 
             {
+                log "Found pipeline: $($pipeline.name)" -ForegroundColor Green
                 backup-adfpipeline -sub $subscription -rg $resourceGroup -adf $factory.name -pipeline $pipeline.name -outputfile "$srcfolder\$($factory.name)\pipelines\$($pipeline.name).json"
             }
         }
 
         #backup dataflows
-        Write-Host "Command Running: az datafactory dataset list --resource-group $resourceGroup --factory-name $($factory.name)"
-        foreach($dataset in (az datafactory dataflows list --resource-group $resourceGroup --factory-name $factory.name | convertfrom-json))
+        $dataflowuri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/dataflows?api-version=2018-06-01"
+        log "Command Running: az rest --uri $dataflowuri --method get"
+        foreach($dataflow in ((az rest --uri $dataflowuri --method get) | convertfrom-json).value)
         {
-       
-            backup-adfdataset -sub $subscription -rg $resourceGroup -adf $factory.name -dataset $dataset.name -outputfile "$srcfolder\$($factory.name)\datasets\$($dataset.name).json"
+            log "Found data flow: $($dataflow.name)" -ForegroundColor Green
+            backup-adfdataflow -sub $subscription -rg $resourceGroup -adf $factory.name -dataflow $dataflow.name -outputfile "$srcfolder\$($factory.name)\dataflows\$($dataflow.name).json"
         }
 
         #backup datasets
-        Write-Host "Command Running: az datafactory dataset list --resource-group $resourceGroup --factory-name $($factory.name)"
+        log "Command Running: az datafactory dataset list --resource-group $resourceGroup --factory-name $($factory.name)"
         foreach($dataset in (az datafactory dataset list --resource-group $resourceGroup --factory-name $factory.name | convertfrom-json))
         {
-       
+            log "Found data set: $($dataset.name)" -ForegroundColor Green
             backup-adfdataset -sub $subscription -rg $resourceGroup -adf $factory.name -dataset $dataset.name -outputfile "$srcfolder\$($factory.name)\datasets\$($dataset.name).json"
         }
 
         #backup linked services
-        Write-Host "Command running: az datafactory linked-service list --resource-group $resourceGroup --factory-name $($factory.name)"
+        log "Command running: az datafactory linked-service list --resource-group $resourceGroup --factory-name $($factory.name)"
         foreach($service in (az datafactory linked-service list --resource-group $resourceGroup --factory-name $factory.name | convertfrom-json))
         {
-        
+            log "Found linkedservice: $($service.name)" -ForegroundColor Green
             backup-adflinkedservice -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $service.name -outputfile "$srcfolder\$($factory.name)\linkedservices\$($service.name).json"
         }
 
@@ -276,24 +279,31 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
 
 }
 
+function log($msg, $foregroundcolor = "white")
+{
+    
+    Write-Host $msg -ForegroundColor $foregroundcolor
+    "$(get-date): $msg" | Out-File -FilePath "$($pwd.Path)\adfbcdr.log" -Append
+}
+
 
 function restore-factories($sub, $rg, $srcfolder, $suffix = "", $region = "")
 {
-    Write-Host "Restore factories running on sub: $sub with RG: $resourceGroup with source folder: $srcfolder"
+    log "Restore factories running on sub: $sub with RG: $resourceGroup with source folder: $srcfolder"
     $srcdir = get-item -Path $srcfolder
 
     foreach($factory in $srcdir.GetDirectories())
     {
-        Write-Host "Starting restore of Factory $($factory.Name) in resource group $resourceGroup"
+        log "Starting restore of Factory $($factory.Name) in resource group $resourceGroup"
 
         try
         {
             #suffix is included here to ensure the ADF name is unique globally.  Backup and restore won't work if you haven't deleted the source factory otherwise.
-            deploy-adffactory -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -inputfile "$($factory.FullName)\$($factory.Name).json" -suffix $suffix -region $region
+            deploy-adffactory -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -inputfile "$($factory.FullName)\$($factory.Name).json" -region $region
         }
         catch
         {
-            Write-Host $_.Exception -ForegroundColor Red
+            log $_.Exception -ForegroundColor Red
             continue
         }
 
@@ -303,11 +313,17 @@ function restore-factories($sub, $rg, $srcfolder, $suffix = "", $region = "")
             deploy-adflinkedservice -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -linkedservice $service.BaseName -inputfile $service.FullName
         }
 
-        #deploy datasets
-        Write-Host "Command Running: az datafactory dataset list --resource-group $resourceGroup --factory-name $($factory.name)"
+        #deploy dataflows
+        log "Deploying backed up Data flows..."
         foreach($dataset in $factory.GetDirectories("datasets").GetFiles())
         {
             deploy-adfdataset -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -dataset $dataset.BaseName -inputfile $dataset.FullName
+        }
+
+                #deploy datasets
+        foreach($dataflow in $factory.GetDirectories("dataflows").GetFiles())
+        {
+            deploy-adfdataflow -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -dataflow $dataflow.BaseName -inputfile $dataflow.FullName
         }
 
         #deploy pipelines last
@@ -318,24 +334,7 @@ function restore-factories($sub, $rg, $srcfolder, $suffix = "", $region = "")
     }
 }
 
-#if you don't have it - your pipeline will hang on the az cli commands in Powershell ISE, and outright fail on the shell.
+# if you don't have it - your pipeline will hang on the az cli commands in Powershell ISE, and outright fail on the shell.
 az extension add --name datafactory --yes
-
-
-$subscription = "e36582a6-9e0c-4644-9b78-592ffe29a705"
-$resourceGroup = "DefaultResourceGroup-EUS2"
-$srcfolder = "c:\projects\adfbackup"
-
-az account set -s $subscription
-#backup works great!
-#backup-factories -sub $subscription -resourceGroup $resourceGroup -srcfolder $srcfolder -filter $true -lookbackMonths 1
-
-#Restore works great!
-restore-factories -sub $subscription -resourceGroup $resourceGroup -srcfolder $srcfolder -suffix "-new" -region "eastus2"
-
-
-
-#bob's your uncle.  Get the lastUpdated value from the run, and that's your runtime.  Validate this on Ravi's setup?
-
-#check-pipelinelastrun -adf TDDemoGit -rg $resourceGroup -pipeline 126DemoTDGitTest -months 1
-
+# You also need the Data factory resource provider registered in your sub
+az provider register --namespace "Microsoft.Datafactory"
