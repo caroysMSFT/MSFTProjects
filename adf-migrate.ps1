@@ -9,15 +9,38 @@ function run-azcmd($cmd, $deserialize = $true)
     log "Command Running: $cmd"
     $scriptblock = {$cmd}
     $result = iex $cmd 2>&1
-    if($LASTEXITCODE -gt 0)
+    if($LASTEXITCODE -ne 0)
     {
         #get the stderr of invoke-expression, log it.
+        log "Last exit code was $LASTEXITCODE" -ForegroundColor Red
+        log $Error[1] -ForegroundColor Red
         log $Error[0] -ForegroundColor Red
         throw $Error[0]
     }
+
+    <#Run-AzCmd deserialize=$false flag is intended for pulling ARM templates.
+    Therefore, we will only check for continuation token where we're sending back objects#>
     switch($deserialize)
     {
-        $true {return ($result | convertfrom-json )}
+        $true {
+                $results += ($result | convertfrom-json ).Value
+                if(($result | convertfrom-json ).nextLink -ne $null)
+                {
+                    $nextlink = ($result | convertfrom-json ).nextLink
+                    $bDone = $false
+                    while($bDone -eq $false)
+                    {
+                        log "trying nextlink: $nextlink" -ForegroundColor Yellow
+                        $tmp = (run-azcmd "az rest --uri `'`"$nextlink`"`' --method get") 
+                        $results += $tmp.value
+                        if($tmp.nextLink -eq $null) 
+                        { $bDone = $true} 
+                        else
+                        { $nextlink = $tmp.nextLink }
+                    } 
+                }
+                return $results
+               }
         $false {return $result}
     }
 }
