@@ -284,7 +284,7 @@ function deploy-adfdataset($sub, $rg, $adf, $dataset, $inputfile, $folder = $nul
 
 function backup-adfpipeline($sub, $rg, $adf, $pipeline, $outputfile)
 {
-    log "Starting backup of pipeline $pipeline in factory $adf in resource group $rg"
+    log "Starting backup of pipeline $pipeline in factory $adf in resource group $rg, output file: $outputfile"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "`'https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01`'"
 
