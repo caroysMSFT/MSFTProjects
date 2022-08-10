@@ -6,6 +6,7 @@ function log($msg, $foregroundcolor = "white")
 
 function run-azcmd($cmd, $deserialize = $true)
 {
+    $results = @()
     log "Command Running: $cmd"
     $scriptblock = {$cmd}
     $result = iex $cmd 2>&1
@@ -23,7 +24,27 @@ function run-azcmd($cmd, $deserialize = $true)
     switch($deserialize)
     {
         $true {
-                $results += ($result | convertfrom-json ).Value
+                # first check here...
+                $tmpresult = ($result | convertfrom-json )
+                write-host $tmpresult
+                switch($tmpresult)
+                {
+                    {($PSItem | get-member value) -ne $null} 
+                        {
+                            write-host "value array switch hit" -ForegroundColor Green
+                            $results += ($result | convertfrom-json ).value
+                        }
+                    {$PSItem.count -gt 0}
+                        {
+                            write-host "array switch hit" -ForegroundColor Green
+                            $results += ($result | convertfrom-json )
+                        }
+                    {($PSItem | get-member type) -ne $null}
+                        {
+                            write-host "single value switch hit" -ForegroundColor Green
+                            $results += $PSItem
+                        }
+                }
                 if(($result | convertfrom-json ).nextLink -ne $null)
                 {
                     $nextlink = ($result | convertfrom-json ).nextLink
@@ -32,7 +53,7 @@ function run-azcmd($cmd, $deserialize = $true)
                     {
                         log "trying nextlink: $nextlink" -ForegroundColor Yellow
                         $tmp = (run-azcmd "az rest --uri `'`"$nextlink`"`' --method get") 
-                        $results += $tmp.value
+                        $results += $tmp
                         if($tmp.nextLink -eq $null) 
                         { $bDone = $true} 
                         else
@@ -41,7 +62,11 @@ function run-azcmd($cmd, $deserialize = $true)
                 }
                 return $results
                }
-        $false {return $result}
+        $false 
+            {
+                # this is only used for downloading templates, so no possibility of skiptoken
+                return $result
+            }
     }
 }
 
@@ -284,7 +309,7 @@ function deploy-adfdataset($sub, $rg, $adf, $dataset, $inputfile, $folder = $nul
 
 function backup-adfpipeline($sub, $rg, $adf, $pipeline, $outputfile)
 {
-    log "Starting backup of pipeline $pipeline in factory $adf in resource group $rg, output file: $outputfile"
+    log "Starting backup of pipeline $pipeline in factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "`'https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01`'"
 
@@ -339,10 +364,10 @@ function ensure-adfdirectory($srcpath)
     if(Test-Path -Path $srcpath)
     {
         log "Path is found; trying to verify subfolders under $srcpath"
-        if(!(Test-Path -Path "$srcpath\pipelines")) { log "Creating pipelines folder..."; new-item -path "$srcpath" -ItemType Directory}
-        if(!(Test-Path -Path "$srcpath\datasets")) { log "Creating datasets folder..."; new-item -path "$srcpath" -ItemType Directory}
-        if(!(Test-Path -Path "$srcpath\linkedservices")) { log "Creating linkedservices folder...";new-item -path "$srcpath" -ItemType Directory}
-        if(!(Test-Path -Path "$srcpath\dataflows")) { log "Creating linkedservices folder...";new-item -path "$srcpath" -ItemType Directory}
+        if(!(Test-Path -Path "$srcpath\pipelines")) { log "Creating pipelines folder:  $srcpath\pipelines"; new-item -path "$srcpath" -ItemType Directory}
+        if(!(Test-Path -Path "$srcpath\datasets")) { log "Creating datasets folder:  $srcpath\datasets"; new-item -path "$srcpath" -ItemType Directory}
+        if(!(Test-Path -Path "$srcpath\linkedservices")) { log "Creating linkedservices folder: $srcpath\linkedservices ";new-item -path "$srcpath" -ItemType Directory}
+        if(!(Test-Path -Path "$srcpath\dataflows")) { log "Creating linkedservices folder:  $srcpath\dataflows";new-item -path "$srcpath" -ItemType Directory}
     }
     else
     {
@@ -364,10 +389,10 @@ function check-pipelinelastrun($adf, $rg, $pipeline, [int]$months = 8)
 
     $runs = run-azcmd "az datafactory pipeline-run query-by-factory --resource-group $rg --factory-name $adf --last-updated-after $oldDateStamp --last-updated-before $todayDateStamp --filters operand=`"PipelineName`" operator=`"Equals`" values=`"$pipeline`""
     
-    log "Pipeline $pipeline has this many runs: $($runs.Value.Count)"
-    if($runs.Value.Count -gt 0)
+    log "Pipeline $pipeline has this many runs: $($runs.Count)"
+    if($runs.Count -gt 0)
     {
-        $lastRun = [datetime]::parse(($runs.value | Sort-Object -Property runEnd -Descending)[0].runEnd)
+        $lastRun = [datetime]::parse(($runs | Sort-Object -Property runEnd -Descending)[0].runEnd)
     }
     else { 
         return $false 
@@ -523,7 +548,7 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
         #backup pipelines first
         $pipelineuri = "`'https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/pipelines?api-version=2018-06-01`'"
 
-        foreach($pipeline in (run-azcmd "az rest --uri $pipelineuri --method get").value)
+        foreach($pipeline in (run-azcmd "az rest --uri $pipelineuri --method get"))
         {
             log "Evaluating $($pipeline.name)" -foregroundcolor yellow
 
@@ -559,7 +584,7 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
 
         #backup dataflows
         $dataflowuri = "`'https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/dataflows?api-version=2018-06-01`'"
-        foreach($dataflow in ((run-azcmd "az rest --uri $dataflowuri --method get").value))
+        foreach($dataflow in ((run-azcmd "az rest --uri $dataflowuri --method get")))
         {
             # ensure data flow is referenced by a recently run pipeline
             # not actually required...  commenting out to keep all
@@ -591,7 +616,7 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
         #backup datasets
         $dataseturi = "`'https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/datasets?api-version=2018-06-01`'"
 
-        foreach($dataset in ((run-azcmd "az rest --uri $dataseturi --method get").value))
+        foreach($dataset in ((run-azcmd "az rest --uri $dataseturi --method get")))
         {
             if($datasets -contains $dataset.name)
             {
