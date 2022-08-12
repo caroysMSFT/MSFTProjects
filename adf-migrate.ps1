@@ -137,7 +137,7 @@ function deploy-adffactory($sub, $rg, $adf, $inputfile, $region = "")
 {
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$($adf)?api-version=2018-06-01"
 
-   $token = (run-azcmd "az account get-access-token").accessToken
+   $token = (run-azcmd "az account get-access-token" -deserialize $false | convertfrom-json).accessToken
 
    $template =  (get-content -Path $inputfile | convertfrom-json)
 
@@ -193,7 +193,7 @@ function deploy-adflinkedservice($sub, $rg, $adf, $linkedservice, $inputfile)
    log "Starting restore of linked service $linkedservice in factory $adf in resource group $rg"
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/linkedservices/$($linkedservice)?api-version=2018-06-01"
 
-   $token = (run-azcmd "az account get-access-token").accessToken
+   $token = (run-azcmd "az account get-access-token" -deserialize $false | convertfrom-json).accessToken
 
    $template = despace-template (get-content -Path $inputfile | convertfrom-json)
 
@@ -229,7 +229,7 @@ function deploy-adfdataflow($sub, $rg, $adf, $dataflow, $inputfile, $folder = $n
    log "Starting restore of data flow $dataflow in factory $adf in resource group $rg"
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/dataFlows/$($dataflow)?api-version=2018-06-01"
 
-   $token = (run-azcmd "az account get-access-token").accessToken
+   $token = (run-azcmd "az account get-access-token" -deserialize $false | convertfrom-json).accessToken
 
    $template = despace-template (get-content -Path $inputfile | convertfrom-json)
    $template.name = $dataflow
@@ -277,7 +277,7 @@ function deploy-adfdataset($sub, $rg, $adf, $dataset, $inputfile, $folder = $nul
    log "Starting deploy of data set $dataset in factory $adf in resource group $rg"
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/datasets/$($dataset)?api-version=2018-06-01"
 
-   $token = (run-azcmd "az account get-access-token").accessToken
+   $token = (run-azcmd "az account get-access-token" -deserialize $false | convertfrom-json).accessToken
 
    $template = get-content -Path $inputfile | convertfrom-json
 
@@ -329,7 +329,7 @@ function deploy-adfpipeline($sub, $rg, $adf, $pipeline, $inputfile, $folder = $n
    $pipeline = $pipeline.Replace(" ","_")
    
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01"
-   $token = (run-azcmd "az account get-access-token").accessToken
+   $token = (run-azcmd "az account get-access-token" -deserialize $false | convertfrom-json).accessToken
 
    $template = despace-template (get-content -Path $inputfile | convertfrom-json)
    $template.name = $pipeline
