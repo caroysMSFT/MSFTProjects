@@ -714,3 +714,63 @@ function restore-factories($sub, $rg, $srcfolder, $suffix = "", $region = "")
         }
     }
 }
+
+# Exists flag is there to tell this function not to deploy the factory - useful for pushing artifacts to an existing factory which had nothing to do with the source.
+# There's not that much that is inherited from the factory itself (region, identity), so this is a worthwhile exercise.
+function restore-factory($sub, $rg, $srcfile, $name = "", $region = "", $exists = $false)
+{
+    log "Restore factories running on sub: $sub with RG: $resourceGroup with source folder: $srcfolder"
+    $srcfileobj = get-item -Path $srcfile
+
+    $factory = (get-content -Path $srcfile | convertfrom-json)
+
+    if($name -eq "")
+    {
+        $name = $factory.name
+    }
+
+    log "Starting restore of Factory $($factory.Name) in resource group $resourceGroup using name: $name"
+
+    try
+    {
+        if($exists -ne $true)
+        {
+            deploy-adffactory -sub $subscription -rg $resourceGroup -adf $name -inputfile $srcfile -region $region
+        }
+    }
+    catch
+    {
+        log $_.Exception -ForegroundColor Red
+        continue
+    }
+
+    #deploy linked services
+    foreach($service in $srcfileobj.directory.GetDirectories("linkedservices").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories))
+    {
+        deploy-adflinkedservice -sub $subscription -rg $resourceGroup -adf $name -linkedservice $service.BaseName -inputfile $service.FullName
+    }
+      
+    log "Deploying backed up Data sets..."
+    foreach($dataset in $srcfileobj.directory.GetDirectories("datasets").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories))
+    {
+        log "found dataset $dataset"
+        $folder = $dataset.Directory.FullName.Replace("$($factory.FullName)\datasets","").Trim("\").Replace("\","/")
+        deploy-adfdataset -sub $subscription -rg $resourceGroup -adf $name -dataset $dataset.BaseName -inputfile $dataset.FullName -folder $folder
+    }
+
+    log "Deploying backed up Data flows..."
+    foreach($dataflow in $srcfileobj.directory.GetDirectories("dataflows").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories))
+    {
+        log "found dataflow $dataflow"
+        $folder = $dataflow.Directory.FullName.Replace("$($factory.FullName)\dataflows","").Trim("\").Replace("\","/")
+        deploy-adfdataflow -sub $subscription -rg $resourceGroup -adf $name -dataflow $dataflow.BaseName -inputfile $dataflow.FullName -folder $folder
+    }
+
+    #deploy pipelines last
+    foreach($pipeline in $srcfileobj.directory.GetDirectories("pipelines").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories))
+    {
+        log "found pipeline $pipeline"
+        $folder = $pipeline.Directory.FullName.Replace("$($factory.FullName)\pipelines","").Trim("\").Replace("\","/")
+        deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf $name -pipeline $pipeline.BaseName -inputfile $pipeline.FullName -folder $folder
+    }
+}
