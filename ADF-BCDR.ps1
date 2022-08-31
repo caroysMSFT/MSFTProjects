@@ -6,19 +6,67 @@ function log($msg, $foregroundcolor = "white")
 
 function run-azcmd($cmd, $deserialize = $true)
 {
+    $results = @()
     log "Command Running: $cmd"
     $scriptblock = {$cmd}
     $result = iex $cmd 2>&1
-    if($LASTEXITCODE -gt 0)
+    if($LASTEXITCODE -ne 0)
     {
-        #somehow get the stdout of invoke-command, log it.
+        #get the stderr of invoke-expression, log it.
+        log "Last exit code was $LASTEXITCODE" -ForegroundColor Red
+        log $Error[1] -ForegroundColor Red
         log $Error[0] -ForegroundColor Red
         throw $Error[0]
     }
+
+    <#Run-AzCmd deserialize=$false flag is intended for pulling ARM templates.
+    Therefore, we will only check for continuation token where we're sending back objects#>
     switch($deserialize)
     {
-        $true {return ($result | convertfrom-json)}
-        $false {return $result}
+        $true {
+                # first check here...
+                $tmpresult = ($result | convertfrom-json )
+                write-host $tmpresult
+                switch($tmpresult)
+                {
+                    {($PSItem | get-member value) -ne $null} 
+                        {
+                            write-host "value array switch hit" -ForegroundColor Green
+                            $results += ($result | convertfrom-json ).value
+                        }
+                    {$PSItem.count -gt 0}
+                        {
+                            write-host "array switch hit" -ForegroundColor Green
+                            $results += ($result | convertfrom-json )
+                        }
+                    {($PSItem | get-member type) -ne $null}
+                        {
+                            write-host "single value switch hit" -ForegroundColor Green
+                            $results += $PSItem
+                        }
+                }
+                if(($result | convertfrom-json ).nextLink -ne $null)
+                {
+                    $nextlink = ($result | convertfrom-json ).nextLink
+                    $bDone = $false
+                    while($bDone -eq $false)
+                    {
+                        log "trying nextlink: $nextlink" -ForegroundColor Yellow
+                        $tmp = (run-azcmd "az rest --uri `'`"$nextlink`"`' --method get") 
+                        $results += $tmp
+                        if($tmp.nextLink -eq $null) 
+                        { $bDone = $true} 
+                        else
+                        { $nextlink = $tmp.nextLink }
+                    } 
+                }
+                return $results
+               }
+        $false 
+            {
+                # this is only used for downloading templates, so no possibility of skiptoken
+                return $result
+            }
     }
 }
 
