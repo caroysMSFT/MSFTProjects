@@ -295,10 +295,11 @@ function ensure-adfdirectory($srcpath)
     if(Test-Path -Path $srcpath)
     {
         log "Path is found; trying to verify subfolders under $srcpath"
-        if(!(Test-Path -Path "$srcpath\pipelines")) { log "Creating pipelines folder..."; new-item -path "$srcpath" -ItemType Directory}
-        if(!(Test-Path -Path "$srcpath\datasets")) { log "Creating datasets folder..."; new-item -path "$srcpath" -ItemType Directory}
-        if(!(Test-Path -Path "$srcpath\linkedservices")) { log "Creating linkedservices folder...";new-item -path "$srcpath" -ItemType Directory}
-        if(!(Test-Path -Path "$srcpath\dataflows")) { log "Creating linkedservices folder...";new-item -path "$srcpath" -ItemType Directory}
+        if(!(Test-Path -Path "$srcpath\pipelines")) { log "Creating pipelines folder:  $srcpath\pipelines"; new-item -path "$srcpath" -ItemType Directory}
+        if(!(Test-Path -Path "$srcpath\datasets")) { log "Creating datasets folder:  $srcpath\datasets"; new-item -path "$srcpath" -ItemType Directory}
+        if(!(Test-Path -Path "$srcpath\linkedservices")) { log "Creating linkedservices folder: $srcpath\linkedservices ";new-item -path "$srcpath" -ItemType Directory}
+        if(!(Test-Path -Path "$srcpath\dataflows")) { log "Creating linkedservices folder:  $srcpath\dataflows";new-item -path "$srcpath" -ItemType Directory}
+        if(!(Test-Path -Path "$srcpath\integrationruntimes")) { log "Creating linkedservices folder:  $srcpath\dataflows";new-item -path "$srcpath" -ItemType Directory}
     }
     else
     {
@@ -308,6 +309,7 @@ function ensure-adfdirectory($srcpath)
         new-item -path "$srcpath\datasets" -ItemType Directory
         new-item -path "$srcpath\linkedservices" -ItemType Directory
         new-item -path "$srcpath\dataflows" -ItemType Directory
+        new-item -path "$srcpath\integrationruntimes" -ItemType Directory
     }
 }
 
