@@ -156,6 +156,42 @@ function deploy-adflinkedservice($sub, $rg, $adf, $linkedservice, $inputfile)
    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
 }
 
+function backup-adfintegrationruntime($sub, $rg, $adf, $integrationruntime, $outputfile)
+{
+    log "Starting backup of linked service $linkedservice in factory $adf in resource group $rg"
+    # Get the pipeline via AZ CLI - gives us the cleanest JSON
+    $uri = "`'https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/integrationruntimes/$($integrationruntime)?api-version=2018-06-01`'"
+
+    $json = run-azcmd "az rest --uri $uri --method get" -deserialize $false
+
+    <# We can use this verbatim - no fixup needed.
+    
+    There's some extra stuff in the JSON, like ETAG, modified time, etc.  But this gets stripped when you publish it.  
+    Meanwhile, it's data which is useful in source control as forensic/historical info.#>
+    $json | out-file $outputfile
+}
+
+function deploy-adfintegrationruntime($sub, $rg, $adf, $integrationruntime, $inputfile)
+{
+   $linkedservice = $linkedservice.Replace(" ","_")
+   log "Starting restore of linked service $linkedservice in factory $adf in resource group $rg"
+   $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/integrationruntimes/$($integrationruntime)?api-version=2018-06-01"
+
+   $token = (run-azcmd "az account get-access-token").accessToken
+
+   $template = despace-template (get-content -Path $inputfile | convertfrom-json)
+
+   $template.name = $linkedservice
+
+   $body = $template | convertto-json -depth 10
+
+   $headers = @{}
+   $headers["Authorization"] = "Bearer $token"
+   log "Callling REST method: $uri"
+   #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
+   Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
+}
+
 function backup-adfdataflow($sub, $rg, $adf, $dataflow, $outputfile)
 {
     log "Starting backup of data flow $dataflow in factory $adf in resource group $rg"
@@ -345,11 +381,20 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
             backup-adflinkedservice -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $service.name -outputfile "$srcfolder\$($factory.name)\linkedservices\$($service.name).json"
         }
 
+        #backup integration runtimes
+        $linkedservicesuri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/integrationruntimes?api-version=2018-06-01"
+        foreach($runtime in ((run-azcmd "az rest --uri $linkedservicesuri --method get").value))
+        {
+            log "Found integration runtime: $($runtime.name)" -ForegroundColor Green
+            backup-adflinkedservice -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $service.name -outputfile "$srcfolder\$($factory.name)\integrationruntimes\$($runtime.name).json"
+        }
+
         #backup the factory itself
         backup-adffactory -sub $subscription -rg $resourceGroup -adf $factory.name -outputfile "$srcfolder\$($factory.name)\$($factory.name).json"
     }
 
 }
+
 
 
 function restore-factories($sub, $rg, $srcfolder, $suffix = "", $region = "")
@@ -372,29 +417,41 @@ function restore-factories($sub, $rg, $srcfolder, $suffix = "", $region = "")
             continue
         }
 
+        #deploy integration runtimes
+        foreach($runtime in $factory.GetDirectories("integrationruntimes").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories))
+        {
+            deploy-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -integrationruntime $runtime.BaseName -inputfile $service.FullName
+        }
+
         #deploy linked services
-        foreach($service in $factory.GetDirectories("linkedservices").GetFiles())
+        foreach($service in $factory.GetDirectories("linkedservices").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories))
         {
             deploy-adflinkedservice -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -linkedservice $service.BaseName -inputfile $service.FullName
         }
-
-        #deploy dataflows
-        log "Deploying backed up Data flows..."
-        foreach($dataset in $factory.GetDirectories("datasets").GetFiles())
+      
+        log "Deploying backed up Data sets..."
+        foreach($dataset in $factory.GetDirectories("datasets").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories))
         {
-            deploy-adfdataset -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -dataset $dataset.BaseName -inputfile $dataset.FullName
+            log "found dataset $dataset"
+            $folder = $dataset.Directory.FullName.Replace("$($factory.FullName)\datasets","").Trim("\").Replace("\","/")
+            deploy-adfdataset -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -dataset $dataset.BaseName -inputfile $dataset.FullName -folder $folder
         }
 
-                #deploy datasets
-        foreach($dataflow in $factory.GetDirectories("dataflows").GetFiles())
+        log "Deploying backed up Data flows..."
+        foreach($dataflow in $factory.GetDirectories("dataflows").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories))
         {
-            deploy-adfdataflow -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -dataflow $dataflow.BaseName -inputfile $dataflow.FullName
+            log "found dataflow $dataflow"
+            $folder = $dataflow.Directory.FullName.Replace("$($factory.FullName)\dataflows","").Trim("\").Replace("\","/")
+            deploy-adfdataflow -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -dataflow $dataflow.BaseName -inputfile $dataflow.FullName -folder $folder
         }
 
         #deploy pipelines last
-        foreach($pipeline in $factory.GetDirectories("pipelines").GetFiles())
+        foreach($pipeline in $factory.GetDirectories("pipelines").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories))
         {
-            deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -pipeline $pipeline.BaseName -inputfile $pipeline.FullName
+            log "found pipeline $pipeline"
+            $folder = $pipeline.Directory.FullName.Replace("$($factory.FullName)\pipelines","").Trim("\").Replace("\","/")
+            deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -pipeline $pipeline.BaseName -inputfile $pipeline.FullName -folder $folder
         }
     }
 }
+
