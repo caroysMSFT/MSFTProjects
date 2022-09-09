@@ -310,7 +310,8 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
         ensure-adfdirectory -srcpath "$srcfolder\$($factory.name)"
 
         #backup pipelines first
-        foreach($pipeline in (run-azcmd "az datafactory pipeline list --resource-group $resourceGroup --factory-name $($factory.name)"))
+        $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/pipelines?api-version=2018-06-01"
+        foreach($pipeline in (run-azcmd "az rest --uri $uri --method get"))
         {
             #Don't back up if not run in last X months...
             if(($Filter -and (check-pipelinelastrun -adf $factory.name -rg $resourceGroup -pipeline $pipeline.name -months $lookbackMonths)) -or !($Filter)) 
@@ -329,14 +330,16 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
         }
 
         #backup datasets
-        foreach($dataset in (run-azcmd "az datafactory dataset list --resource-group $resourceGroup --factory-name $($factory.name)"))
+        $dataseturi = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/datasets?api-version=2018-06-01"
+        foreach($dataset in ((run-azcmd "az rest --uri $dataseturi --method get").value))
         {
             log "Found data set: $($dataset.name)" -ForegroundColor Green
             backup-adfdataset -sub $subscription -rg $resourceGroup -adf $factory.name -dataset $dataset.name -outputfile "$srcfolder\$($factory.name)\datasets\$($dataset.name).json"
         }
 
         #backup linked services
-        foreach($service in (run-azcmd "az datafactory linked-service list --resource-group $resourceGroup --factory-name $($factory.name)"))
+        $linkedservicesuri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/linkedservices?api-version=2018-06-01"
+        foreach($service in ((run-azcmd "az rest --uri $linkedservicesuri --method get").value))
         {
             log "Found linkedservice: $($service.name)" -ForegroundColor Green
             backup-adflinkedservice -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $service.name -outputfile "$srcfolder\$($factory.name)\linkedservices\$($service.name).json"
