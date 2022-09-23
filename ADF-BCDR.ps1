@@ -63,54 +63,6 @@ function run-azcmd($cmd, $deserialize = $true)
     }
 }
 
-function despace-template($json)
-{
-    $type = $json.id.split("/")[9]
-
-
-    switch($type)
-    {
-        "pipelines" 
-        {
-            foreach($activity in $json.properties.activities)
-            {
-                foreach($property in $activity.typeProperties)
-                {
-                    if($property.dataflow -ne $null) 
-                    { 
-                        $property.dataflow.referenceName = $property.dataflow.referenceName.Replace(" ","_")
-                    }
-                }
-
-                foreach($linkedservice in $activity.linkedServiceName)
-                {
-                    if($linkedservice.type -eq "LinkedServiceReference") { $linkedservice.referenceName = $linkedservice.referenceName.Replace(" ","_")}
-                }
-            }
-        }
-        "datasets" 
-        {
-            foreach($linkedservice in $json.properties.linkedServiceName)
-            {
-                if($linkedservice.type -eq "LinkedServiceReference") { $linkedservice.referenceName = $linkedservice.referenceName.Replace(" ","_")}
-            }
-        }
-        "dataflows" 
-        {
-            foreach($source in $json.properties.typeProperties.sources)
-            {
-                if($source.linkedService.type -eq "LinkedServiceReference") { $linkedservice.referenceName = $linkedservice.referenceName.Replace(" ","_")}
-            }
-
-            foreach($sink in $json.properties.typeProperties.sinks)
-            {
-                if($sink.linkedService.type -eq "LinkedServiceReference") { $linkedservice.referenceName = $linkedservice.referenceName.Replace(" ","_")}
-            }
-        }
-    }
-    return $json
-}
-
 function backup-adffactory($sub, $rg, $adf, $outputfile)
 {
     log "Starting backup of factory $adf in resource group $rg"
@@ -182,20 +134,16 @@ function backup-adflinkedservice($sub, $rg, $adf, $linkedservice, $outputfile)
 
 function deploy-adflinkedservice($sub, $rg, $adf, $linkedservice, $inputfile)
 {
-   $linkedservice = $linkedservice.Replace(" ","_")
    log "Starting restore of linked service $linkedservice in factory $adf in resource group $rg"
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/linkedservices/$($linkedservice)?api-version=2018-06-01"
 
    $token = (run-azcmd "az account get-access-token").accessToken
 
-   $template = despace-template (get-content -Path $inputfile | convertfrom-json)
-
-   $template.name = $linkedservice
-
-   $body = $template | convertto-json -depth 10
+   $body = get-content -Path $inputfile
 
    $headers = @{}
    $headers["Authorization"] = "Bearer $token"
+   $headers["Content-Type"] = "application/json"
    log "Callling REST method: $uri"
    #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
@@ -203,7 +151,7 @@ function deploy-adflinkedservice($sub, $rg, $adf, $linkedservice, $inputfile)
 
 function backup-adfintegrationruntime($sub, $rg, $adf, $integrationruntime, $outputfile)
 {
-    log "Starting backup of linked service $linkedservice in factory $adf in resource group $rg"
+    log "Starting backup of linked service $integrationruntime in factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "`'https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/integrationruntimes/$($integrationruntime)?api-version=2018-06-01`'"
 
@@ -218,23 +166,20 @@ function backup-adfintegrationruntime($sub, $rg, $adf, $integrationruntime, $out
 
 function deploy-adfintegrationruntime($sub, $rg, $adf, $integrationruntime, $inputfile)
 {
-   $linkedservice = $linkedservice.Replace(" ","_")
    log "Starting restore of linked service $linkedservice in factory $adf in resource group $rg"
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/integrationruntimes/$($integrationruntime)?api-version=2018-06-01"
 
    $token = (run-azcmd "az account get-access-token").accessToken
 
-   $template = despace-template (get-content -Path $inputfile | convertfrom-json)
-
-   $template.name = $linkedservice
-
-   $body = $template | convertto-json -depth 10
+   $body = get-content -Path $inputfile
 
    $headers = @{}
    $headers["Authorization"] = "Bearer $token"
+   $headers["Content-Type"] = "application/json"
    log "Callling REST method: $uri"
+   $headers
    #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
-   Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
+   Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers
 }
 
 function backup-adfdataflow($sub, $rg, $adf, $dataflow, $outputfile)
@@ -254,32 +199,17 @@ function backup-adfdataflow($sub, $rg, $adf, $dataflow, $outputfile)
 
 function deploy-adfdataflow($sub, $rg, $adf, $dataflow, $inputfile, $folder = $null)
 {
-   $dataflow = $dataflow.Replace(" ","_")
+
    log "Starting restore of data flow $dataflow in factory $adf in resource group $rg"
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/dataFlows/$($dataflow)?api-version=2018-06-01"
 
    $token = (run-azcmd "az account get-access-token").accessToken
 
-   $template = despace-template (get-content -Path $inputfile | convertfrom-json)
-   $template.name = $dataflow
-
-   if($folder -ne $null)
-   {
-        if($template.properties.folder -ne $null)
-        {
-            $template.properties.folder.name = $folder
-        }
-        else
-        {
-            $template.properties | add-member -Name "folder" -Value ("{ `"name`": `"$folder`" }" | convertfrom-json) -MemberType NoteProperty
-        }
-
-   }
-   $body = $template | convertto-json -Depth 10
+   $body = get-content -Path $inputfile
 
    $headers = @{}
    $headers["Authorization"] = "Bearer $token"
-
+   $headers["Content-Type"] = "application/json"
    log "Callling REST method: $uri"
    #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
@@ -308,28 +238,11 @@ function deploy-adfdataset($sub, $rg, $adf, $dataset, $inputfile, $folder = $nul
 
    $token = (run-azcmd "az account get-access-token").accessToken
 
-   $template = get-content -Path $inputfile | convertfrom-json
-
-   if($folder -ne $null)
-   {
-        if($template.properties.folder -ne $null)
-        {
-            $template.properties.folder.name = $folder
-        }
-        else
-        {
-            $template.properties | add-member -Name "folder" -Value ("{ `"name`": `"$folder`" }" | convertfrom-json) -MemberType NoteProperty
-        }
-        $body = $template | convertto-json -Depth 10
-   }
-   else
-   {
-        $body = get-content -Path $inputfile
-   }
+   $body = get-content -Path $inputfile
 
    $headers = @{}
    $headers["Authorization"] = "Bearer $token"
-
+   $headers["Content-Type"] = "application/json"
    log "Callling REST method: $uri"
    #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
@@ -355,33 +268,15 @@ function backup-adfpipeline($sub, $rg, $adf, $pipeline, $outputfile)
 function deploy-adfpipeline($sub, $rg, $adf, $pipeline, $inputfile, $folder = $null)
 {
    log "Starting restore of pipeline $pipeline in factory $adf in resource group $rg"
-   $pipeline = $pipeline.Replace(" ","_")
    
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01"
    $token = (run-azcmd "az account get-access-token").accessToken
 
-   $template = despace-template (get-content -Path $inputfile | convertfrom-json)
-   $template.name = $pipeline
-
-   if($folder -ne $null)
-   {
-
-        if($template.properties.folder -ne $null)
-        {
-            $template.properties.folder.name = $folder
-        }
-        else
-        {
-            $template.properties | add-member -Name "folder" -Value ("{ `"name`": `"$folder`" }" | convertfrom-json) -MemberType NoteProperty
-        }
-        
-   }
-
-   $body = $template | convertto-json -Depth 10
+   $body = get-content -Path $inputfile
 
    $headers = @{}
    $headers["Authorization"] = "Bearer $token"
-
+   $headers["Content-Type"] = "application/json"
    log "Callling REST method: $uri"
    #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
@@ -432,136 +327,6 @@ function check-pipelinelastrun($adf, $rg, $pipeline, [int]$months = 8)
     return ([DateTime]::Compare($lastRun,[DateTime]::Now.AddMonths($months * -1)) -gt 0)
 }
 
-function get-datasets($json)
-{
-    $type = $json.id.split("/")[9]
-    $datasets = @()
-
-    switch($type)
-    {
-        "pipelines" 
-        {
-            foreach($activity in $json.properties.activities)
-            {
-                log "checking activity $($activity.name) for pipeline $($json.name)"
-                foreach($input in $activity.inputs)
-                {
-                    if($input.type -eq "DatasetReference") 
-                    { 
-                        log "found dataset $($input.referenceName) for pipeline $($json.name)"
-                        $datasets += $input.referenceName
-                    }
-                }
-
-                foreach($output in $activity.outputs)
-                {
-                    if($output.type -eq "DatasetReference") 
-                    { 
-                        log "found dataset $($output.referenceName) for pipeline $($json.name)"
-                        $datasets += $output.referenceName
-                    }
-                }
-            }
-        }
-        "dataflows" 
-        {
-            foreach($source in $json.properties.typeProperties.sources)
-            {
-                if($source.dataset.type -eq "DatasetReference") { $datasets += $source.dataset.referenceName}
-            }
-
-            foreach($sink in $json.properties.typeProperties.sinks)
-            {
-                if($sink.dataset.type -eq "DatasetReference") { $datasets += $sink.dataset.referenceName}
-            }
-            
-        }
-    }
-    return $datasets
-}
-
-function get-dataflows($json)
-{
-    $type = $json.id.split("/")[9]
-    $dataflows = @()
-
-    switch($type)
-    {
-        "pipelines" 
-        {
-            foreach($activity in $json.properties.activities)
-            {
-                foreach($property in $activity.typeProperties)
-                {
-                    if($property.dataflow -ne $null) 
-                    { 
-                        $dataflows += $property.dataflow.referenceName
-                    }
-                }
-            }
-        }
-    }
-    return $dataflows
-}
-
-
-function get-linkedservices($json)
-{
-    $type = $json.id.split("/")[9]
-    $linkedservices = @()
-
-    switch($type)
-    {
-        "pipelines" 
-        {
-            foreach($activity in $json.properties.activities)
-            {
-                foreach($linkedservice in $activity.linkedServiceName)
-                {
-                    if($linkedservice.type -eq "LinkedServiceReference") { $linkedservices += $linkedservice.referenceName}
-                }
-            }
-        }
-        "datasets" 
-        {
-            foreach($linkedservice in $json.properties.linkedServiceName)
-            {
-                if($linkedservice.type -eq "LinkedServiceReference") { $linkedservices += $linkedservice.referenceName}
-            }
-        }
-        "dataflows" 
-        {
-            foreach($source in $json.properties.typeProperties.sources)
-            {
-                if($source.linkedService.type -eq "LinkedServiceReference") { $linkedservices += $source.linkedService.referenceName}
-            }
-
-            foreach($sink in $json.properties.typeProperties.sinks)
-            {
-                if($sink.linkedService.type -eq "LinkedServiceReference") { $linkedservices += $sink.linkedService.referenceName}
-            }
-        }
-    }
-    return $linkedservices
-}
-
-function get-dataflowdatasets($dataflows, $factory, $resourceGroup, $subscription)
-{
-    $datasets = @()
-    #get dataflow JSON   
-
-    foreach($dataflow in $dataflows)
-    {
-        $dataflowuri = "`'https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory)/dataFlows/$($dataflow)?api-version=2018-06-01`'"
-        $dataflowobj = (run-azcmd "az rest --uri $dataflowuri --method get")
-        $datasets += (get-datasets $dataflowobj)
-    }
-    return $datasets
-}
-
-
-
-
 function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $lookbackMonths = 12)
 {
 
@@ -611,11 +376,11 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
         }
 
         #backup integration runtimes
-        $linkedservicesuri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/integrationruntimes?api-version=2018-06-01"
-        foreach($runtime in (run-azcmd "az rest --uri $linkedservicesuri --method get"))
+        $integrationruntimesuri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/integrationruntimes?api-version=2018-06-01"
+        foreach($runtime in (run-azcmd "az rest --uri $integrationruntimesuri --method get"))
         {
             log "Found integration runtime: $($runtime.name)" -ForegroundColor Green
-            backup-adflinkedservice -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $service.name -outputfile "$srcfolder\$($factory.name)\integrationruntimes\$($runtime.name).json"
+            backup-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $service.name -outputfile "$srcfolder\$($factory.name)\integrationruntimes\$($runtime.name).json"
         }
 
         #backup the factory itself
