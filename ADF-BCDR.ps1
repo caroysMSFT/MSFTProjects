@@ -155,7 +155,7 @@ function backup-adfintegrationruntime($sub, $rg, $adf, $integrationruntime, $out
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "`'https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/integrationruntimes/$($integrationruntime)?api-version=2018-06-01`'"
 
-    $json = run-azcmd "az rest --uri $uri --method get" -deserialize $false
+    $json = run-azcmd "az rest --uri $uri --method get" -deserialize $true | convertto-json -depth 10
 
     <# We can use this verbatim - no fixup needed.
     
@@ -380,7 +380,7 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
         foreach($runtime in (run-azcmd "az rest --uri $integrationruntimesuri --method get"))
         {
             log "Found integration runtime: $($runtime.name)" -ForegroundColor Green
-            backup-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $runtime.name -outputfile "$srcfolder\$($factory.name)\integrationruntimes\$($runtime.name).json"
+            backup-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf $factory.name -integrationruntime $runtime.name -outputfile "$srcfolder\$($factory.name)\integrationruntimes\$($runtime.name).json"
         }
 
         #backup the factory itself
