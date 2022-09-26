@@ -380,7 +380,7 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
         foreach($runtime in (run-azcmd "az rest --uri $integrationruntimesuri --method get"))
         {
             log "Found integration runtime: $($runtime.name)" -ForegroundColor Green
-            backup-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $service.name -outputfile "$srcfolder\$($factory.name)\integrationruntimes\$($runtime.name).json"
+            backup-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $runtime.name -outputfile "$srcfolder\$($factory.name)\integrationruntimes\$($runtime.name).json"
         }
 
         #backup the factory itself
@@ -414,7 +414,7 @@ function restore-factories($sub, $rg, $srcfolder, $suffix = "", $region = "")
         #deploy integration runtimes
         foreach($runtime in $factory.GetDirectories("integrationruntimes").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories))
         {
-            deploy-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -integrationruntime $runtime.BaseName -inputfile $service.FullName
+            deploy-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -integrationruntime $runtime.BaseName -inputfile $runtime.FullName
         }
 
         #deploy linked services
