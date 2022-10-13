@@ -573,7 +573,7 @@ function restore-factories {
 
         #deploy integration runtimes
         foreach ($runtime in $factory.GetDirectories("integrationruntimes").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories)) {
-            deploy-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -integrationruntime $runtime.BaseName -inputfile $service.FullName
+            deploy-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -integrationruntime $runtime.BaseName -inputfile $runtime.FullName
         }
 
         #deploy linked services
