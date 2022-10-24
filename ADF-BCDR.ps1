@@ -3,10 +3,18 @@ function Write-OutLog($msg, $foregroundcolor = "white") {
     "$(get-date): $msg" | Out-File -FilePath "$($pwd.Path)\adfbcdr.log" -Append
 }
 
-function run-azcmd($cmd, $deserialize = $true) {
+function Invoke-AzCmd {
+    [CmdletBinding()]
+    param (
+        [Parameter()]
+        [string]
+        $cmd,
+        [bool]
+        $deserialize = $true
+    )
     Write-OutLog "Command Running: $cmd"
     $scriptblock = { $cmd }
-    $result = iex $cmd 2>&1
+    $result = Invoke-Expression $cmd 2>&1
     if ($LASTEXITCODE -ne 0) {
         #get the stderr of invoke-expression, log it.
         Write-OutLog "Last exit code was $LASTEXITCODE" -ForegroundColor Red
@@ -15,7 +23,7 @@ function run-azcmd($cmd, $deserialize = $true) {
         throw $Error[0]
     }
 
-    <#Run-AzCmd deserialize=$false flag is intended for pulling ARM templates.
+    <#Invoke-AzCmd deserialize=$false flag is intended for pulling ARM templates.
     Therefore, we will only check for continuation token where we're sending back objects#>
     switch ($deserialize) {
         $true {
@@ -26,7 +34,7 @@ function run-azcmd($cmd, $deserialize = $true) {
                 $bDone = $false
                 while ($bDone -eq $false) {
                     Write-OutLog "trying nextlink: $nextlink" -ForegroundColor Yellow
-                    $tmp = (run-azcmd "az rest --uri `'`"$nextlink`"`' --method get") 
+                    $tmp = (Invoke-AzCmd "az rest --uri `'`"$nextlink`"`' --method get") 
                     $results += $tmp
                     if ($tmp.nextLink -eq $null) 
                     { $bDone = $true } 
@@ -48,54 +56,16 @@ function run-azcmd($cmd, $deserialize = $true) {
             }
         }
         $false {
-            return $result
+            
         }
     }
-}
-
-function despace-template($json) {
-    $type = $json.id.split("/")[9]
-
-
-    switch ($type) {
-        "pipelines" {
-            foreach ($activity in $json.properties.activities) {
-                foreach ($property in $activity.typeProperties) {
-                    if ($property.dataflow -ne $null) { 
-                        $property.dataflow.referenceName = $property.dataflow.referenceName.Replace(" ", "_")
-                    }
-                }
-
-                foreach ($linkedservice in $activity.linkedServiceName) {
-                    if ($linkedservice.type -eq "LinkedServiceReference") { $linkedservice.referenceName = $linkedservice.referenceName.Replace(" ", "_") }
-                }
-            }
-        }
-        "datasets" {
-            foreach ($linkedservice in $json.properties.linkedServiceName) {
-                if ($linkedservice.type -eq "LinkedServiceReference") { $linkedservice.referenceName = $linkedservice.referenceName.Replace(" ", "_") }
-            }
-        }
-        "dataflows" {
-            foreach ($source in $json.properties.typeProperties.sources) {
-                if ($source.linkedService.type -eq "LinkedServiceReference") { $linkedservice.referenceName = $linkedservice.referenceName.Replace(" ", "_") }
-            }
-
-            foreach ($sink in $json.properties.typeProperties.sinks) {
-                if ($sink.linkedService.type -eq "LinkedServiceReference") { $linkedservice.referenceName = $linkedservice.referenceName.Replace(" ", "_") }
-            }
-        }
-    }
-    return $json
 }
 
 function backup-adffactory($sub, $rg, $adf, $outputfile) {
     Write-OutLog "Starting backup of factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "`'https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$($adf)?api-version=2018-06-01`'"
-
-    $json = run-azcmd "az rest --uri $uri --method get" -deserialize $false
-
+    $json = Invoke-AzCmd "az rest --uri $uri --method get" -deserialize $false
     <# We can use this verbatim - no fixup needed.
     
     There's some extra stuff in the JSON, like ETAG, modified time, etc.  But this gets stripped when you publish it.  
@@ -105,13 +75,9 @@ function backup-adffactory($sub, $rg, $adf, $outputfile) {
 
 function deploy-adffactory($sub, $rg, $adf, $inputfile, $region = "") {
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$($adf)?api-version=2018-06-01"
-
-    $token = (run-azcmd "az account get-access-token").accessToken
-
+    $token = (Invoke-AzCmd "az account get-access-token").accessToken
     $template = (get-content -Path $inputfile | convertfrom-json)
-
     $template.name = $adf
-
 
     #This is required because if you are creating from scratch, it needs to be blank (creates a new MSI)
     #TODO:  Check and see if already exists.  This is not desirable when it already exists.
@@ -124,12 +90,9 @@ function deploy-adffactory($sub, $rg, $adf, $inputfile, $region = "") {
     if ($region -ne "") {
         $template.location = $region
     }
-
     #This bit enables cross-subscription restore
     $template.id = "/subscriptions/$sub/resourceGroups/$rg/providers/Microsoft.DataFactory/factories/$adf$($suffix)"
-
     $body = $template | convertto-json
-
     $headers = @{}
     $headers["Authorization"] = "Bearer $token"
     $headers["Content-Type"] = "application/json"
@@ -138,13 +101,12 @@ function deploy-adffactory($sub, $rg, $adf, $inputfile, $region = "") {
     Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
 }
 
-
 function backup-adflinkedservice($sub, $rg, $adf, $linkedservice, $outputfile) {
     Write-OutLog "Starting backup of linked service $linkedservice in factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "`'https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/linkedservices/$($linkedservice)?api-version=2018-06-01`'"
 
-    $json = run-azcmd "az rest --uri $uri --method get" -deserialize $false
+    $json = Invoke-AzCmd "az rest --uri $uri --method get" -deserialize $false
 
     <# We can use this verbatim - no fixup needed.
     
@@ -158,9 +120,9 @@ function deploy-adflinkedservice($sub, $rg, $adf, $linkedservice, $inputfile) {
     Write-OutLog "Starting restore of linked service $linkedservice in factory $adf in resource group $rg"
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/linkedservices/$($linkedservice)?api-version=2018-06-01"
 
-    $token = (run-azcmd "az account get-access-token").accessToken
+    $token = (Invoke-AzCmd "az account get-access-token").accessToken
 
-    $template = despace-template (get-content -Path $inputfile | convertfrom-json)
+    $template = (get-content -Path $inputfile | convertfrom-json)
 
     $template.name = $linkedservice
 
@@ -172,13 +134,12 @@ function deploy-adflinkedservice($sub, $rg, $adf, $linkedservice, $inputfile) {
     #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
     Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
 }
-
 function backup-adfintegrationruntime($sub, $rg, $adf, $integrationruntime, $outputfile) {
     Write-OutLog "Starting backup of linked service $linkedservice in factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "`'https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/integrationruntimes/$($integrationruntime)?api-version=2018-06-01`'"
 
-    $json = run-azcmd "az rest --uri $uri --method get" -deserialize $false
+    $json = Invoke-AzCmd "az rest --uri $uri --method get" -deserialize $false
 
     <# We can use this verbatim - no fixup needed.
     
@@ -188,31 +149,24 @@ function backup-adfintegrationruntime($sub, $rg, $adf, $integrationruntime, $out
 }
 
 function deploy-adfintegrationruntime($sub, $rg, $adf, $integrationruntime, $inputfile) {
-    $linkedservice = $linkedservice.Replace(" ", "_")
     Write-OutLog "Starting restore of linked service $linkedservice in factory $adf in resource group $rg"
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/integrationruntimes/$($integrationruntime)?api-version=2018-06-01"
-
-    $token = (run-azcmd "az account get-access-token").accessToken
-
-    $template = despace-template (get-content -Path $inputfile | convertfrom-json)
-
-    $template.name = $linkedservice
-
+    $token = (Invoke-AzCmd "az account get-access-token").accessToken
+    $template = (get-content -Path $inputfile)
     $body = $template | convertto-json -depth 10
-
     $headers = @{}
     $headers["Authorization"] = "Bearer $token"
+    $headers["content-type"] = "application/json"
     Write-OutLog "Callling REST method: $uri"
     #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
     Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
 }
-
 function backup-adfdataflow($sub, $rg, $adf, $dataflow, $outputfile) {
     Write-OutLog "Starting backup of data flow $dataflow in factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "`'https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/dataFlows/$($dataflow)?api-version=2018-06-01`'"
 
-    $json = run-azcmd "az rest --uri $uri --method get" -deserialize $false
+    $json = Invoke-AzCmd "az rest --uri $uri --method get" -deserialize $false
 
     <# We can use this verbatim - no fixup needed.
     
@@ -226,9 +180,9 @@ function deploy-adfdataflow($sub, $rg, $adf, $dataflow, $inputfile, $folder = $n
     Write-OutLog "Starting restore of data flow $dataflow in factory $adf in resource group $rg"
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/dataFlows/$($dataflow)?api-version=2018-06-01"
 
-    $token = (run-azcmd "az account get-access-token").accessToken
+    $token = (Invoke-AzCmd "az account get-access-token").accessToken
 
-    $template = despace-template (get-content -Path $inputfile | convertfrom-json)
+    $template = (get-content -Path $inputfile | convertfrom-json)
     $template.name = $dataflow
 
     if ($folder -ne $null) {
@@ -250,13 +204,12 @@ function deploy-adfdataflow($sub, $rg, $adf, $dataflow, $inputfile, $folder = $n
     Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
 }
 
-
 function backup-adfdataset($sub, $rg, $adf, $dataset, $outputfile) {
     Write-OutLog "Starting backup of dataset $dataset in factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "`'https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/datasets/$($dataset)?api-version=2018-06-01`'"
 
-    $json = run-azcmd "az rest --uri $uri --method get" -deserialize $false
+    $json = Invoke-AzCmd "az rest --uri $uri --method get" -deserialize $false
 
     <# We can use this verbatim - no fixup needed.
     
@@ -269,7 +222,7 @@ function deploy-adfdataset($sub, $rg, $adf, $dataset, $inputfile, $folder = $nul
     Write-OutLog "Starting deploy of data set $dataset in factory $adf in resource group $rg"
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/datasets/$($dataset)?api-version=2018-06-01"
 
-    $token = (run-azcmd "az account get-access-token").accessToken
+    $token = (Invoke-AzCmd "az account get-access-token").accessToken
 
     $template = get-content -Path $inputfile | convertfrom-json
 
@@ -294,14 +247,13 @@ function deploy-adfdataset($sub, $rg, $adf, $dataset, $inputfile, $folder = $nul
     Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
 }
 
-
 function backup-adfpipeline($sub, $rg, $adf, $pipeline, $outputfile) {
     Write-OutLog "Starting backup of pipeline $pipeline in factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "`'https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01`'"
 
     #"`'https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.DataFactory/factories/{factoryName}/pipelines/{pipelineName}?api-version=2018-06-01`'"
-    $json = run-azcmd "az rest --uri $uri --method get"  -deserialize $false
+    $json = Invoke-AzCmd "az rest --uri $uri --method get"  -deserialize $false
 
     <# We can use this verbatim - no fixup needed.
     
@@ -321,27 +273,61 @@ function Deploy-AdfPipeline {
         $folder = $null
     )
     Write-OutLog "Starting restore of pipeline $pipeline in factory $adf in resource group $rg"
-    $pipeline = $pipeline.Replace(" ", "_")
-   
+    $pipeline = $pipeline.Replace(" ", "_") 
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01"
-    $token = (run-azcmd "az account get-access-token").accessToken
+    $token = (Invoke-AzCmd "az account get-access-token").accessToken
+    $template = (get-content -Path $inputfile | convertfrom-json)
+    $body = $template
+    $headers = @{}
+    $headers["Authorization"] = "Bearer $token"
 
-    $template = despace-template (get-content -Path $inputfile | convertfrom-json)
+    Write-OutLog "Callling REST method: $uri"
+    #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
+    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
+}
+
+function Backup-AdfTrigger {
+    [CmdletBinding()]
+    param (
+        $sub, 
+        $rg, 
+        $adf, 
+        $trigger, 
+        $outputfile
+    )
+    Write-OutLog "Starting backup of trigger $trigger in factory $adf in resource group $rg"
+    # Get the pipeline via AZ CLI - gives us the cleanest JSON
+    $uri = "`'https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/triggers/$($trigger)?api-version=2018-06-01`'"
+    #"`'https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.DataFactory/factories/{factoryName}/pipelines/{pipelineName}?api-version=2018-06-01`'"
+    $json = Invoke-AzCmd "az rest --uri $uri --method get"  -deserialize $false
+    $json | out-file $outputfile
+}
+
+function Deploy-AdfTrigger {
+    [CmdletBinding()]
+    param (
+        $sub, 
+        $rg, 
+        $adf, 
+        $trigger, 
+        $inputfile, 
+        $folder = $null
+    )
+    Write-OutLog "Starting restore of trigger $trigger in factory $adf in resource group $rg"
+    $pipeline = $pipeline.Replace(" ", "_")
+    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/triggers/$($trigger)?api-version=2018-06-01"
+    $token = (Invoke-AzCmd "az account get-access-token").accessToken
+    $template = (get-content -Path $inputfile | convertfrom-json)
     $template.name = $pipeline
-
-    if ($folder -ne $null) {
-
-        if ($template.properties.folder -ne $null) {
+    if ($null -ne $folder) {
+        if ($null -ne $template.properties.folder ) {
             $template.properties.folder.name = $folder
         }
         else {
             $template.properties | add-member -Name "folder" -Value ("{ `"name`": `"$folder`" }" | convertfrom-json) -MemberType NoteProperty
         }
-        
     }
-
     $body = $template | convertto-json -Depth 10
-
     $headers = @{}
     $headers["Authorization"] = "Bearer $token"
 
@@ -358,7 +344,8 @@ function ensure-adfdirectory($srcpath) {
         if (!(Test-Path -Path "$srcpath\datasets")) { Write-OutLog "Creating datasets folder:  $srcpath\datasets"; new-item -path "$srcpath" -ItemType Directory }
         if (!(Test-Path -Path "$srcpath\linkedservices")) { Write-OutLog "Creating linkedservices folder: $srcpath\linkedservices "; new-item -path "$srcpath" -ItemType Directory }
         if (!(Test-Path -Path "$srcpath\dataflows")) { Write-OutLog "Creating linkedservices folder:  $srcpath\dataflows"; new-item -path "$srcpath" -ItemType Directory }
-        if (!(Test-Path -Path "$srcpath\integrationruntimes")) { Write-OutLog "Creating linkedservices folder:  $srcpath\dataflows"; new-item -path "$srcpath" -ItemType Directory }
+        if (!(Test-Path -Path "$srcpath\integrationruntimes")) { Write-OutLog "Creating linkedservices folder:  $srcpath\integrationruntimes"; new-item -path "$srcpath" -ItemType Directory }
+        if (!(Test-Path -Path "$srcpath\triggers")) { Write-OutLog "Creating linkedservices folder:  $srcpath\triggers"; new-item -path "$srcpath" -ItemType Directory }
     }
     else {
         Write-OutLog "Creating $srcpath from scratch...";
@@ -368,6 +355,7 @@ function ensure-adfdirectory($srcpath) {
         new-item -path "$srcpath\linkedservices" -ItemType Directory
         new-item -path "$srcpath\dataflows" -ItemType Directory
         new-item -path "$srcpath\integrationruntimes" -ItemType Directory
+        new-item -path "$srcpath\triggers" -ItemType Directory
     }
 }
 
@@ -377,7 +365,7 @@ function check-pipelinelastrun($adf, $rg, $pipeline, [int]$months = 8) {
     $todayDateStamp = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH\:mm\:ss.fffffffZ")  #az datafactory command expects ISO8601 timestamp format
     $oldDateStamp = "2015-01-01T00:00:00.00Z"  #predates ARM, should be safe as a baseline date range.
 
-    $runs = run-azcmd "az datafactory pipeline-run query-by-factory --resource-group $rg --factory-name $adf --last-updated-after $oldDateStamp --last-updated-before $todayDateStamp --filters operand=`"PipelineName`" operator=`"Equals`" values=`"$pipeline`""
+    $runs = Invoke-AzCmd "az datafactory pipeline-run query-by-factory --resource-group $rg --factory-name $adf --last-updated-after $oldDateStamp --last-updated-before $todayDateStamp --filters operand=`"PipelineName`" operator=`"Equals`" values=`"$pipeline`""
     
     Write-OutLog "Pipeline $pipeline has this many runs: $($runs.Value.Count)"
     if ($runs.Value.Count -gt 0) {
@@ -482,19 +470,16 @@ function get-dataflowdatasets($dataflows, $factory, $resourceGroup, $subscriptio
 
     foreach ($dataflow in $dataflows) {
         $dataflowuri = "`'https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory)/dataFlows/$($dataflow)?api-version=2018-06-01`'"
-        $dataflowobj = (run-azcmd "az rest --uri $dataflowuri --method get")
+        $dataflowobj = (Invoke-AzCmd "az rest --uri $dataflowuri --method get")
         $datasets += (get-datasets $dataflowobj)
     }
     return $datasets
 }
 
-
-
-
 function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $lookbackMonths = 12) {
 
     Write-OutLog "Backup factories running on sub: $sub with RG: $resourceGroup with source folder: $srcfolder"
-    $factories = (run-azcmd "az resource list --resource-group $resourceGroup --resource-type `"Microsoft.Datafactory/factories`"")
+    $factories = (Invoke-AzCmd "az resource list --resource-group $resourceGroup --resource-type `"Microsoft.Datafactory/factories`"")
     foreach ($factory in $factories) {
         Write-OutLog "Starting backup of Factory $($factory.name) in resource group $resourceGroup"
         
@@ -503,7 +488,7 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
 
         #backup pipelines first
         $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/pipelines?api-version=2018-06-01"
-        foreach ($pipeline in (run-azcmd "az rest --uri $uri --method get")) {
+        foreach ($pipeline in (Invoke-AzCmd "az rest --uri $uri --method get")) {
             #Don't back up if not run in last X months...
             if (($Filter -and (check-pipelinelastrun -adf $factory.name -rg $resourceGroup -pipeline $pipeline.name -months $lookbackMonths)) -or !($Filter)) {
                 Write-OutLog "Found pipeline: $($pipeline.name)" -ForegroundColor Green
@@ -513,28 +498,28 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
 
         #backup dataflows
         $dataflowuri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/dataflows?api-version=2018-06-01"
-        foreach ($dataflow in (run-azcmd "az rest --uri $dataflowuri --method get")) {
+        foreach ($dataflow in (Invoke-AzCmd "az rest --uri $dataflowuri --method get")) {
             Write-OutLog "Found data flow: $($dataflow.name)" -ForegroundColor Green
             backup-adfdataflow -sub $subscription -rg $resourceGroup -adf $factory.name -dataflow $dataflow.name -outputfile "$srcfolder\$($factory.name)\dataflows\$($dataflow.name).json"
         }
 
         #backup datasets
         $dataseturi = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/datasets?api-version=2018-06-01"
-        foreach ($dataset in (run-azcmd "az rest --uri $dataseturi --method get")) {
+        foreach ($dataset in (Invoke-AzCmd "az rest --uri $dataseturi --method get")) {
             Write-OutLog "Found data set: $($dataset.name)" -ForegroundColor Green
             backup-adfdataset -sub $subscription -rg $resourceGroup -adf $factory.name -dataset $dataset.name -outputfile "$srcfolder\$($factory.name)\datasets\$($dataset.name).json"
         }
 
         #backup linked services
         $linkedservicesuri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/linkedservices?api-version=2018-06-01"
-        foreach ($service in (run-azcmd "az rest --uri $linkedservicesuri --method get")) {
+        foreach ($service in (Invoke-AzCmd "az rest --uri $linkedservicesuri --method get")) {
             Write-OutLog "Found linkedservice: $($service.name)" -ForegroundColor Green
             backup-adflinkedservice -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $service.name -outputfile "$srcfolder\$($factory.name)\linkedservices\$($service.name).json"
         }
 
         #backup integration runtimes
         $linkedservicesuri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/integrationruntimes?api-version=2018-06-01"
-        foreach ($runtime in (run-azcmd "az rest --uri $linkedservicesuri --method get")) {
+        foreach ($runtime in (Invoke-AzCmd "az rest --uri $linkedservicesuri --method get")) {
             Write-OutLog "Found integration runtime: $($runtime.name)" -ForegroundColor Green
             backup-adflinkedservice -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $service.name -outputfile "$srcfolder\$($factory.name)\integrationruntimes\$($runtime.name).json"
         }
@@ -545,13 +530,11 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
 
 }
 
-
-
 function restore-factories {
     [CmdletBinding()]
     param (
         $sub, 
-        $rg, 
+        $resourceGroup, 
         $srcfolder, 
         $suffix = "", 
         $region = ""
@@ -571,8 +554,14 @@ function restore-factories {
             continue
         }
 
+        # New/Restore ADF
+        $factoryPrincipalId = (Invoke-AzCmd -cmd "az datafactory list" -deserialize $true | Where-Object { $_.Name -eq "$($factory.name)$suffix" }).identity.principalId 
+        if($null -eq $factoryPrincipalId){ Write-OutLog -msg "Unable to get ID to "}
         #deploy integration runtimes
         foreach ($runtime in $factory.GetDirectories("integrationruntimes").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories)) {
+            # Old/Existing ADF
+            $scope = (Get-Content $runtime.FullName | ConvertFrom-Json -Depth 4).id
+            Invoke-AzCmd -cmd "az role assignment create --role 'Contributor' --assignee-object-id $factoryPrincipalId --scope $scope" -deserialize $false
             deploy-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -integrationruntime $runtime.BaseName -inputfile $runtime.FullName
         }
 
@@ -595,19 +584,19 @@ function restore-factories {
             deploy-adfdataflow -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -dataflow $dataflow.BaseName -inputfile $dataflow.FullName -folder $folder
         }
 
-        #deploy pipelines last
-        #foreach ($pipeline in $factory.GetDirectories("pipelines").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories)) {
-        #    Write-OutLog "found pipeline $pipeline"
-        #    $folder = $pipeline.Directory.FullName.Replace("$($factory.FullName)\pipelines", "").Trim("\").Replace("\", "/")
-        #    deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -pipeline $pipeline.BaseName -inputfile $pipeline.FullName -folder $folder
-        #}
+        #deploy pipelines
         $splat = @{
-            SouceDirectory = $folder
+            SouceDirectory = $srcfolder
             Subscription   = $subscription
             ResourceGroup  = $resourceGroup
             ADF            = "$($factory.name)$suffix"
         }
         Deploy-AdfPipelineDependancy @splat
+
+        # deploy triggers last
+        foreach ($trigger in $factory.GetDirectories("triggers").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories)) {
+            Deploy-AdfTrigger -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -trigger $trigger.BaseName -inputfile $trigger.FullName
+        }
     }
 }
 
@@ -647,18 +636,18 @@ function Deploy-AdfPipelineDependancy {
     $deployCount = ($dependsOn | Where-Object { $null -eq $_.Deployed }).count
     while ($deployCount -gt 0) {
         foreach ($path in $list) {
-            Write-OutLog -msg $path.BaseName
+            Write-OutLog -msg "Attempting to deploy pipeline $($path.BaseName)"
             $get = $dependson | Where-Object { $_.Name -eq $path.BaseName }
-            if ($get.Deployed -ieq "X") { Write-OutLog -msg "Pipeline Deployed" -ForegroundColor Green }
+            if ($get.Deployed -ieq "X") { Write-OutLog -msg "$($path.BaseName) Pipeline Deployed" -ForegroundColor Green }
             elseif ($null -ne $get.DependsOn ) {
-                "Has Dependancy ($($get.DependsOn)"
+                Write-OutLog -msg "$($path.BaseName) Has Dependancy $($get.DependsOn)"
                 $depend = $get.DependsOn
                 $getdepend = $dependson | Where-object { $_.Name -eq $depend }
                 if ($null -eq $getdepend.Deployed) {
-                    Write-OutLog -msg "Dependancy not deployed yet" -ForegroundColor Yellow
+                    Write-OutLog -msg "$($path.BaseName) dependancy, $($get.DependsOn), not deployed yet" -ForegroundColor Yellow
                 }
                 else {
-                    Write-OutLog -msg "Dependancy deployed. Deploying pipeline!" -ForegroundColor Cyan
+                    Write-OutLog -msg "Dependancy $($get.DependsOn) deployed. Deploying pipeline $($path.BaseName)!" -ForegroundColor Cyan
                     try {
                         deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf $adf -pipeline $path.BaseName -inputfile $path.FullName -folder $folder
                         $get.Deployed = "X"
@@ -670,12 +659,13 @@ function Deploy-AdfPipelineDependancy {
                 }
             }
             else {
-                Write-OutLog -msg "Does not have dependancy. Deploying pipeline." -ForegroundColor Green
+                Write-OutLog -msg "$($path.BaseName) Does not have dependancy. Deploying pipeline." -ForegroundColor Green
                 try {
                     deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf $adf -pipeline $path.BaseName -inputfile $path.FullName -folder $folder
                     $get.Deployed = "X"
                 }
                 catch {
+                    Write-OutLog -msg "Failed to deploy pipeline $($path.BaseName)"
                     throw "Failed to deploy pipeline $($path.BaseName)"
                 }
             }
