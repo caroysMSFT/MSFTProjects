@@ -695,13 +695,14 @@ function Set-ADFManagedIdentity {
     # No output when using Invoke-AzCmd, need that output
     $oldaid = az ad sp list --display-name $factoryName --query [].id --output tsv
     #az role assignment list --assignee # uses graph API
-    $roles = az role assignment list --assignee $oldaid --all # does not work returnns [] # only works if --all is added
+    # does not work returnns [] # only works if --all is added
+    $roles = az role assignment list --assignee $oldaid --all | ConvertFrom-Json -Depth 4
     Write-OutLog "Role Information: "
     Write-OutLog $roles
     $aid = az ad sp list --display-name $newFactoryName --query [].id --output tsv
     # Assign Role
     foreach ($role in $roles) {
-        Invoke-AzCmd -cmd "az role assignment create --assignee $aid --role $($role.roleDefinitionName) --scope $($role.scope)"
+        Invoke-AzCmd -cmd "az role assignment create --assignee ""$aid"" --role ""$($role.roleDefinitionName)"" --scope ""$($role.scope)"" "
     }
 
 }
