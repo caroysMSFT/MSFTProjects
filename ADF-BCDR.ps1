@@ -565,6 +565,9 @@ function restore-factories {
             deploy-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -integrationruntime $runtime.BaseName -inputfile $runtime.FullName
         }
 
+        #Set Role Assignment to System Indentity
+        Set-ADFManagedIdentity -factoryName $factory.name -newFactoryName "$($factory.name)$suffix"
+
         #deploy linked services
         foreach ($service in $factory.GetDirectories("linkedservices").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories)) {
             deploy-adflinkedservice -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -linkedservice $service.BaseName -inputfile $service.FullName
@@ -672,4 +675,33 @@ function Deploy-AdfPipelineDependancy {
         }
         $deployCount = ($dependsOn | Where-Object { $null -eq $_.Deployed }).count
     }
+}
+
+function Set-ADFManagedIdentity {
+    [CmdletBinding()]
+    param (
+        $factoryName,
+        $newFactoryName
+    )
+    # figure out if it's system or user assigned, currently assuming system
+    #$type = (Get-Content (Get-ChildItem g-adf-2d-gdp-redaanalytics-01.json -Path $path).FullName | ConvertFrom-Json).identity.type
+    #if ($type -eq 'SystemAssigned') {
+    Write-OutLog "Setting System Managed Identity Roles..."
+    #Not using user assgined
+    ##User Assgined Managed ID
+    #$managedIdName = (az identity list | ConvertFrom-Json | Where-Object{$_.principalId -eq $midPrincipalId}).name
+    #az ad sp list --display-name $managedIdName --query [].id --output tsv
+    #System Assigned Managed ID
+    # No output when using Invoke-AzCmd, need that output
+    $oldaid = az ad sp list --display-name $factoryName --query [].id --output tsv
+    #az role assignment list --assignee # uses graph API
+    $roles = az role assignment list --assignee $oldaid --all # does not work returnns [] # only works if --all is added
+    Write-OutLog "Role Information: "
+    Write-OutLog $roles
+    $aid = az ad sp list --display-name $newFactoryName --query [].id --output tsv
+    # Assign Role
+    foreach ($role in $roles) {
+        Invoke-AzCmd -cmd "az role assignment create --assignee $aid --role $($role.roleDefinitionName) --scope $($role.scope)"
+    }
+
 }
