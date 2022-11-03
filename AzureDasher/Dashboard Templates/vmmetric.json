@@ -1,0 +1,60 @@
+{
+  "properties": {
+    "lenses": {
+      "0": {
+        "order": 0,
+        "parts": {
+        }
+      }
+    },
+    "metadata": {
+      "model": {
+        "timeRange": {
+          "value": {},
+          "type": "MsPortalFx.Composition.Configuration.ValueTypes.TimeRange"
+        },
+        "filterLocale": {
+          "value": "en-us"
+        },
+        "filters": {
+          "value": {
+            "MsPortalFx_TimeRange": {
+              "model": {
+                "format": "utc",
+                "granularity": "auto",
+                "relative": "1h"
+              },
+              "displayCache": {
+                "name": "UTC Time",
+                "value": "Past hour"
+              },
+              "filteredPartIds": [
+                "StartboardPart-MonitorChartPart-b2753c33-02af-4973-8c4d-2e0b8bd40a65",
+                "StartboardPart-MonitorChartPart-b2753c33-02af-4973-8c4d-2e0b8bd40a67",
+                "StartboardPart-MonitorChartPart-b2753c33-02af-4973-8c4d-2e0b8bd40a69",
+                "StartboardPart-MonitorChartPart-b2753c33-02af-4973-8c4d-2e0b8bd40a6b",
+                "StartboardPart-MonitorChartPart-b2753c33-02af-4973-8c4d-2e0b8bd40a6d",
+                "StartboardPart-MonitorChartPart-b2753c33-02af-4973-8c4d-2e0b8bd40a6f",
+                "StartboardPart-MonitorChartPart-b2753c33-02af-4973-8c4d-2e0b8bd40a71",
+                "StartboardPart-MonitorChartPart-b2753c33-02af-4973-8c4d-2e0b8bd40a73",
+                "StartboardPart-MonitorChartPart-b2753c33-02af-4973-8c4d-2e0b8bd40a75",
+                "StartboardPart-MonitorChartPart-b2753c33-02af-4973-8c4d-2e0b8bd40a77",
+                "StartboardPart-MonitorChartPart-b2753c33-02af-4973-8c4d-2e0b8bd40a79",
+                "StartboardPart-MonitorChartPart-b2753c33-02af-4973-8c4d-2e0b8bd40a7b",
+                "StartboardPart-MonitorChartPart-b2753c33-02af-4973-8c4d-2e0b8bd40a7d",
+                "StartboardPart-MonitorChartPart-b2753c33-02af-4973-8c4d-2e0b8bd40a7f"
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "name": "VMDash2",
+  "type": "Microsoft.Portal/dashboards",
+  "location": "INSERT LOCATION",
+  "tags": {
+    "hidden-title": "VMDash2"
+  },
+  "apiVersion": "2015-08-01-preview"
+}
