@@ -56,7 +56,7 @@ function Invoke-AzCmd {
             }
         }
         $false {
-            
+            return $result
         }
     }
 }
@@ -153,7 +153,7 @@ function deploy-adfintegrationruntime($sub, $rg, $adf, $integrationruntime, $inp
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/integrationruntimes/$($integrationruntime)?api-version=2018-06-01"
     $token = (Invoke-AzCmd "az account get-access-token").accessToken
     $template = (get-content -Path $inputfile)
-    $body = $template | convertto-json -depth 10
+    $body = $template | convertto-json -depth 4
     $headers = @{}
     $headers["Authorization"] = "Bearer $token"
     $headers["content-type"] = "application/json"
@@ -194,7 +194,7 @@ function deploy-adfdataflow($sub, $rg, $adf, $dataflow, $inputfile, $folder = $n
         }
 
     }
-    $body = $template | convertto-json -Depth 10
+    $body = $template | convertto-json -Depth 4
 
     $headers = @{}
     $headers["Authorization"] = "Bearer $token"
@@ -233,7 +233,7 @@ function deploy-adfdataset($sub, $rg, $adf, $dataset, $inputfile, $folder = $nul
         else {
             $template.properties | add-member -Name "folder" -Value ("{ `"name`": `"$folder`" }" | convertfrom-json) -MemberType NoteProperty
         }
-        $body = $template | convertto-json -Depth 10
+        $body = $template | convertto-json -Depth 4
     }
     else {
         $body = get-content -Path $inputfile
@@ -327,7 +327,7 @@ function Deploy-AdfTrigger {
             $template.properties | add-member -Name "folder" -Value ("{ `"name`": `"$folder`" }" | convertfrom-json) -MemberType NoteProperty
         }
     }
-    $body = $template | convertto-json -Depth 10
+    $body = $template | convertto-json -Depth 4
     $headers = @{}
     $headers["Authorization"] = "Bearer $token"
 
@@ -555,13 +555,23 @@ function restore-factories {
         }
 
         # New/Restore ADF
+        # Pause needed as it fails if created too soon after ADF is created
+        Write-OutLog "Pause for 60 seconds..."
+        Start-Sleep -Seconds 30
+        Write-OutLog "30 seconds left..."
+        Start-Sleep -Seconds 20
+        Write-OutLog "10 seconds left..."
+        Start-Sleep -Seconds 10
         $factoryPrincipalId = (Invoke-AzCmd -cmd "az datafactory list" -deserialize $true | Where-Object { $_.Name -eq "$($factory.name)$suffix" }).identity.principalId 
         if($null -eq $factoryPrincipalId){ Write-OutLog -msg "Unable to get ID to "}
         #deploy integration runtimes
         foreach ($runtime in $factory.GetDirectories("integrationruntimes").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories)) {
             # Old/Existing ADF
             $scope = (Get-Content $runtime.FullName | ConvertFrom-Json -Depth 4).id
-            Invoke-AzCmd -cmd "az role assignment create --role 'Contributor' --assignee-object-id $factoryPrincipalId --scope $scope" -deserialize $false
+            Write-OutLog "Scope is $scope"
+            Write-OutLog "Factory Pricipal ID is $factoryPrincipalId"
+            Write-OutLog "Setting Role for Integrated Runtime"
+            Invoke-AzCmd -cmd "az role assignment create --role 'Contributor' --assignee $factoryPrincipalId --scope $scope" -deserialize $false
             deploy-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -integrationruntime $runtime.BaseName -inputfile $runtime.FullName
         }
 
@@ -577,6 +587,7 @@ function restore-factories {
         foreach ($dataset in $factory.GetDirectories("datasets").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories)) {
             Write-OutLog "found dataset $dataset"
             $folder = $dataset.Directory.FullName.Replace("$($factory.FullName)\datasets", "").Trim("\").Replace("\", "/")
+            if($null -ne $folder){ Write-OutLog "Folder is $folder" }
             deploy-adfdataset -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -dataset $dataset.BaseName -inputfile $dataset.FullName -folder $folder
         }
 
@@ -584,6 +595,7 @@ function restore-factories {
         foreach ($dataflow in $factory.GetDirectories("dataflows").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories)) {
             Write-OutLog "found dataflow $dataflow"
             $folder = $dataflow.Directory.FullName.Replace("$($factory.FullName)\dataflows", "").Trim("\").Replace("\", "/")
+            if($null -ne $folder){ Write-OutLog "Folder is $folder" }
             deploy-adfdataflow -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -dataflow $dataflow.BaseName -inputfile $dataflow.FullName -folder $folder
         }
 
@@ -656,8 +668,10 @@ function Deploy-AdfPipelineDependancy {
                         $get.Deployed = "X"
                     }
                     catch {
+                        $message = $_.Exception
                         Write-OutLog -msg "Failed to deploy pipeline $($path.BaseName)"
-                        throw "Failed to deploy pipeline $($path.BaseName)"
+                        Write-OutLog $message -ForegroundColor Red
+                        throw "Failed to deploy pipeline $($path.BaseName): $message"
                     }
                 }
             }
@@ -668,8 +682,10 @@ function Deploy-AdfPipelineDependancy {
                     $get.Deployed = "X"
                 }
                 catch {
+                    $message = $_.Exception
                     Write-OutLog -msg "Failed to deploy pipeline $($path.BaseName)"
-                    throw "Failed to deploy pipeline $($path.BaseName)"
+                    Write-OutLog $message -ForegroundColor Red
+                    throw "Failed to deploy pipeline $($path.BaseName): $message"
                 }
             }
         }
