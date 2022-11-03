@@ -29,3 +29,9 @@ It outputs into a *.csv format which can be ingested into Log Analytics or simil
 Usage:  .\TraceHost.ps1 .\TraceHost.ps1 -pollinterval 120 -uri https://www.microsoft.com
 
 This only works on Windows, due to the get-egressip function, which parses a webpage using a Win32 COM object to get your NAT'd public IP.  You could switch to a REST API method (if you can find a free one), and feasibly get this going on Powershell Core.
+
+## AzureDasher
+
+This uses template .json files from an Azure dashboard (microsoft.portal/dashboards), and creates a dashboard .json file with all available metrics, with multiple resources added to each graph.
+
+This lets you look at the metrics of a pool of resources, one at a time, on one pane of glass to find outliers.  Works (so far) with any resource type.
