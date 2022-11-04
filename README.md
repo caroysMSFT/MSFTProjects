@@ -36,9 +36,11 @@ This uses template .json files from an Azure dashboard (microsoft.portal/dashboa
 
 This lets you look at the metrics of a pool of resources, one at a time, on one pane of glass to find outliers.  May not work with sub-resources (think: VMSS instances, Cosmos databases)
 
-$vms = @('/subscriptions/e36582a6-9e0c-4644-9b78-592ffe29a705/resourceGroups/appgwenv/providers/Microsoft.Compute/virtualMachines/newaspx',
-'/subscriptions/e36582a6-9e0c-4644-9b78-592ffe29a705/resourceGroups/APPGWENV/providers/Microsoft.Compute/virtualMachines/neweraspx',
-'/subscriptions/e36582a6-9e0c-4644-9b78-592ffe29a705/resourceGroups/AppGWEnv/providers/Microsoft.Compute/virtualMachines/newjeaspx')
+### Usage
+
+$vms = @('/subscriptions/(subid)/resourceGroups/(RG)/providers/Microsoft.Compute/virtualMachines/(vmname1)',
+'/subscriptions/(subid)/resourceGroups/(RG)/providers/Microsoft.Compute/virtualMachines/(vmname2)',
+'/subscriptions/(subid)/resourceGroups/(RG)/providers/Microsoft.Compute/virtualMachines/(vmname3)')
 
 .\AZVMDashboard.ps1 -ResourceList $vms -DashboardName "Cary's Dashboard" -OutputFile carydash.json -OpenNotepad $true 
 
