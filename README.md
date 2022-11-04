@@ -34,4 +34,17 @@ This only works on Windows, due to the get-egressip function, which parses a web
 
 This uses template .json files from an Azure dashboard (microsoft.portal/dashboards), and creates a dashboard .json file with all available metrics, with multiple resources added to each graph.
 
-This lets you look at the metrics of a pool of resources, one at a time, on one pane of glass to find outliers.  Works (so far) with any resource type.
+This lets you look at the metrics of a pool of resources, one at a time, on one pane of glass to find outliers.  May not work with sub-resources (think: VMSS instances, Cosmos databases)
+
+$vms = @('/subscriptions/e36582a6-9e0c-4644-9b78-592ffe29a705/resourceGroups/appgwenv/providers/Microsoft.Compute/virtualMachines/newaspx',
+'/subscriptions/e36582a6-9e0c-4644-9b78-592ffe29a705/resourceGroups/APPGWENV/providers/Microsoft.Compute/virtualMachines/neweraspx',
+'/subscriptions/e36582a6-9e0c-4644-9b78-592ffe29a705/resourceGroups/AppGWEnv/providers/Microsoft.Compute/virtualMachines/newjeaspx')
+
+.\AZVMDashboard.ps1 -ResourceList $vms -DashboardName "Cary's Dashboard" -OutputFile carydash.json -OpenNotepad $true 
+
+Parameters:
+
+ResourceList - should be an array of resourceID's
+DashboardName - the displayname of the output dashboard file
+Outputfile - The JSON file name (or full path) you want it to spit out
+OpenNotepad - a lazy way of getting a look at the fruits of your labor.  Should be boolean value (default is $false)
