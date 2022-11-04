@@ -184,8 +184,8 @@ function deploy-adfdataflow($sub, $rg, $adf, $dataflow, $inputfile, $folder = $n
 
     $template = (get-content -Path $inputfile | convertfrom-json)
     $template.name = $dataflow
-
-    if ($folder -ne $null) {
+    <#
+    if (($null -eq $folder) -or ($folder -eq "")) {
         if ($template.properties.folder -ne $null) {
             $template.properties.folder.name = $folder
         }
@@ -194,6 +194,7 @@ function deploy-adfdataflow($sub, $rg, $adf, $dataflow, $inputfile, $folder = $n
         }
 
     }
+    #>
     $body = $template | convertto-json -Depth 4
 
     $headers = @{}
@@ -225,8 +226,8 @@ function deploy-adfdataset($sub, $rg, $adf, $dataset, $inputfile, $folder = $nul
     $token = (Invoke-AzCmd "az account get-access-token").accessToken
 
     $template = get-content -Path $inputfile | convertfrom-json
-
-    if ($folder -ne $null) {
+    <#
+    if (($null -eq $folder) -or ($folder -eq "")) {
         if ($template.properties.folder -ne $null) {
             $template.properties.folder.name = $folder
         }
@@ -238,7 +239,8 @@ function deploy-adfdataset($sub, $rg, $adf, $dataset, $inputfile, $folder = $nul
     else {
         $body = get-content -Path $inputfile
     }
-
+    #>
+    $body = get-content -Path $inputfile
     $headers = @{}
     $headers["Authorization"] = "Bearer $token"
 
@@ -274,7 +276,7 @@ function Deploy-AdfPipeline {
     )
     Write-OutLog "Starting restore of pipeline $pipeline in factory $adf in resource group $rg"
     $pipeline = $pipeline.Replace(" ", "_") 
-    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01"
+    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$pipeline?api-version=2018-06-01"
     $token = (Invoke-AzCmd "az account get-access-token").accessToken
     $template = (get-content -Path $inputfile | convertfrom-json)
     $body = $template
@@ -283,7 +285,7 @@ function Deploy-AdfPipeline {
 
     Write-OutLog "Callling REST method: $uri"
     #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
-    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
+    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers -Verbose
 }
 
 function Backup-AdfTrigger {
@@ -333,7 +335,7 @@ function Deploy-AdfTrigger {
 
     Write-OutLog "Callling REST method: $uri"
     #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
-    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
+    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers -Verbose
 }
 
 function ensure-adfdirectory($srcpath) {
@@ -521,7 +523,7 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
         $linkedservicesuri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/integrationruntimes?api-version=2018-06-01"
         foreach ($runtime in (Invoke-AzCmd "az rest --uri $linkedservicesuri --method get")) {
             Write-OutLog "Found integration runtime: $($runtime.name)" -ForegroundColor Green
-            backup-adflinkedservice -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $service.name -outputfile "$srcfolder\$($factory.name)\integrationruntimes\$($runtime.name).json"
+            backup-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $service.name -outputfile "$srcfolder\$($factory.name)\integrationruntimes\$($runtime.name).json"
         }
 
         #backup the factory itself
@@ -664,7 +666,7 @@ function Deploy-AdfPipelineDependancy {
                 else {
                     Write-OutLog -msg "Dependancy $($get.DependsOn) deployed. Deploying pipeline $($path.BaseName)!" -ForegroundColor Cyan
                     try {
-                        deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf $adf -pipeline $path.BaseName -inputfile $path.FullName -folder $folder
+                        deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf $adf -pipeline $path.BaseName -inputfile $path.FullName 
                         $get.Deployed = "X"
                     }
                     catch {
@@ -678,7 +680,7 @@ function Deploy-AdfPipelineDependancy {
             else {
                 Write-OutLog -msg "$($path.BaseName) Does not have dependancy. Deploying pipeline." -ForegroundColor Green
                 try {
-                    deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf $adf -pipeline $path.BaseName -inputfile $path.FullName -folder $folder
+                    deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf $adf -pipeline $path.BaseName -inputfile $path.FullName
                     $get.Deployed = "X"
                 }
                 catch {
