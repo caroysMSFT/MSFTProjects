@@ -275,8 +275,8 @@ function Deploy-AdfPipeline {
         $folder = $null
     )
     Write-OutLog "Starting restore of pipeline $pipeline in factory $adf in resource group $rg"
-    $pipeline = $pipeline.Replace(" ", "_") 
-    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$pipeline?api-version=2018-06-01"
+    $pipeline = $pipeline.Replace(" ", "_") # GAP is using underscores in their pipeline names
+    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01"
     $token = (Invoke-AzCmd "az account get-access-token").accessToken
     $template = (get-content -Path $inputfile | convertfrom-json)
     $body = $template
@@ -285,7 +285,14 @@ function Deploy-AdfPipeline {
 
     Write-OutLog "Callling REST method: $uri"
     #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
-    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers -Verbose
+    try {
+        Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers -Verbose
+    }
+    catch {
+        $message = $_.Exception
+        Write-OutLog $message -ForegroundColor Red
+        throw "$message"
+    }
 }
 
 function Backup-AdfTrigger {
@@ -335,7 +342,15 @@ function Deploy-AdfTrigger {
 
     Write-OutLog "Callling REST method: $uri"
     #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
-    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers -Verbose
+    try {
+        Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers -Verbose
+    }
+    catch {
+        $message = $_.Exception
+        Write-OutLog $message -ForegroundColor Red
+        throw "$message"
+    }
+
 }
 
 function ensure-adfdirectory($srcpath) {
@@ -565,15 +580,16 @@ function restore-factories {
         Write-OutLog "10 seconds left..."
         Start-Sleep -Seconds 10
         $factoryPrincipalId = (Invoke-AzCmd -cmd "az datafactory list" -deserialize $true | Where-Object { $_.Name -eq "$($factory.name)$suffix" }).identity.principalId 
-        if($null -eq $factoryPrincipalId){ Write-OutLog -msg "Unable to get ID to "}
+        if ($null -eq $factoryPrincipalId) { Write-OutLog -msg "Unable to get ID to " }
         #deploy integration runtimes
         foreach ($runtime in $factory.GetDirectories("integrationruntimes").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories)) {
             # Old/Existing ADF
-            $scope = (Get-Content $runtime.FullName | ConvertFrom-Json -Depth 4).id
+            $scope = (Get-Content $runtime.FullName | ConvertFrom-Json -Depth 4).properties.typeproperties.linkedInfo.resourceId
             Write-OutLog "Scope is $scope"
             Write-OutLog "Factory Pricipal ID is $factoryPrincipalId"
             Write-OutLog "Setting Role for Integrated Runtime"
-            Invoke-AzCmd -cmd "az role assignment create --role 'Contributor' --assignee $factoryPrincipalId --scope $scope" -deserialize $false
+            if (($null -eq $scope) -or ($scope -eq "") ) { Write-OutLog "Unable to set Integrated Runtime permissions, skipping." }
+            else { Invoke-AzCmd -cmd "az role assignment create --role 'Contributor' --assignee $factoryPrincipalId --scope $scope" -deserialize $false }
             deploy-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -integrationruntime $runtime.BaseName -inputfile $runtime.FullName
         }
 
@@ -589,7 +605,7 @@ function restore-factories {
         foreach ($dataset in $factory.GetDirectories("datasets").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories)) {
             Write-OutLog "found dataset $dataset"
             $folder = $dataset.Directory.FullName.Replace("$($factory.FullName)\datasets", "").Trim("\").Replace("\", "/")
-            if($null -ne $folder){ Write-OutLog "Folder is $folder" }
+            if ($null -ne $folder) { Write-OutLog "Folder is $folder" }
             deploy-adfdataset -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -dataset $dataset.BaseName -inputfile $dataset.FullName -folder $folder
         }
 
@@ -597,7 +613,7 @@ function restore-factories {
         foreach ($dataflow in $factory.GetDirectories("dataflows").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories)) {
             Write-OutLog "found dataflow $dataflow"
             $folder = $dataflow.Directory.FullName.Replace("$($factory.FullName)\dataflows", "").Trim("\").Replace("\", "/")
-            if($null -ne $folder){ Write-OutLog "Folder is $folder" }
+            if ($null -ne $folder) { Write-OutLog "Folder is $folder" }
             deploy-adfdataflow -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -dataflow $dataflow.BaseName -inputfile $dataflow.FullName -folder $folder
         }
 
@@ -711,13 +727,16 @@ function Set-ADFManagedIdentity {
     #az ad sp list --display-name $managedIdName --query [].id --output tsv
     #System Assigned Managed ID
     # No output when using Invoke-AzCmd, need that output
-    $oldaid = az ad sp list --display-name $factoryName --query [].id --output tsv
+    $out = az ad sp list --display-name $factoryName | Convertfrom-Json
+    $oldaid = ($out | Where-Object { $_.displayName -eq $factoryName }).id
+    Write-OutLog "Assignee ID for old ADF is $oldaid"
     #az role assignment list --assignee # uses graph API
     # does not work returnns [] # only works if --all is added
     $roles = az role assignment list --assignee $oldaid --all | ConvertFrom-Json -Depth 4
     Write-OutLog "Role Information: "
     Write-OutLog $roles
     $aid = az ad sp list --display-name $newFactoryName --query [].id --output tsv
+    Write-OutLog "Assignee ID for new ADF is $aid"
     # Assign Role
     foreach ($role in $roles) {
         Invoke-AzCmd -cmd "az role assignment create --assignee ""$aid"" --role ""$($role.roleDefinitionName)"" --scope ""$($role.scope)"" "
