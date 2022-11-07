@@ -535,8 +535,8 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
         }
 
         #backup integration runtimes
-        $linkedservicesuri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/integrationruntimes?api-version=2018-06-01"
-        foreach ($runtime in (Invoke-AzCmd "az rest --uri $linkedservicesuri --method get")) {
+        $integrationruntimeuri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/integrationruntimes?api-version=2018-06-01"
+        foreach ($runtime in (Invoke-AzCmd "az rest --uri $integrationruntimeuri --method get")) {
             Write-OutLog "Found integration runtime: $($runtime.name)" -ForegroundColor Green
             backup-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $service.name -outputfile "$srcfolder\$($factory.name)\integrationruntimes\$($runtime.name).json"
         }
