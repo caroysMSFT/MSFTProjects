@@ -1,3 +1,18 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)]
+    [string[]]$ResourceList,
+    [Parameter()]
+    [string]$ProxyResource,
+    [Parameter(Mandatory)]
+    [string]$DashboardName,
+    [Parameter()]
+    [string]$OutputFile = "outputfile.json",
+    [Parameter()]
+    [bool]$OpenNotepad = $false
+)
+
+
 function get-availablemetrics($resourceid)
 {
     $metriclist = @()
@@ -10,22 +25,28 @@ function get-availablemetrics($resourceid)
     return $metriclist
 }
 
+if([string]::IsNullOrEmpty($proxyresource))
+{
+    Write-host "Proxy resource not used; using first resource to pull list of metrics:" -ForegroundColor Green
+    Write-Host $vms[0] -ForegroundColor Green
+    # Get the first resource to use it to pull the list of metrics
+    $metrics = get-availablemetrics -resourceid $vms[0]
+}
+else
+{
+    #Use the proxy resource.  Why?  It lets us create dashboards for resources we have no access to, 
+    #but pulling available metrics from a resource we DO have access to.
+    $metrics = get-availablemetrics -resourceid $proxyresource
+}
 
-# Get the first resource to use it to pull the list of metrics
-$metrics = get-availablemetrics -resourceid $vms[0]
 
-
-
-
-$vmdash = get-content ".\Dashboard Templates\vmmetric.json" | convertfrom-json 
-
-
+$vmdash = get-content ".\Dashboard Templates\dashboard.json" | convertfrom-json 
 
 $graphcount = 0
 
 foreach($metric in $metrics)
 {
-    $vmpart = get-content ".\Dashboard Templates\base.json" | convertfrom-json
+    $vmpart = get-content ".\Dashboard Templates\resourcepart.json" | convertfrom-json
     #Add a new graph to the Part element using the VMPart JSON
 
     $templatePart = $vmpart.metadata.settings.content.options.chart.metrics[0]
@@ -59,6 +80,17 @@ foreach($metric in $metrics)
     $graphcount++
 }
 
-del output.json
+if(get-item -Path $outputfile)
+{
+    remove-item $outputfile
+}
 
-$vmdash | convertto-json -compress  -Depth 100 >> output.json
+$vmdash.name = $DashboardName
+$vmdash.tags.'hidden-title' = $DashboardName
+
+$vmdash | convertto-json -compress  -Depth 100 >> $outputfile
+
+if($OpenNotepad)
+{
+    notepad $outputfile
+}
