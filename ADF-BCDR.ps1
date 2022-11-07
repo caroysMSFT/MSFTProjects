@@ -56,7 +56,7 @@ function Invoke-AzCmd {
             }
         }
         $false {
-            
+            return $result
         }
     }
 }
@@ -153,7 +153,7 @@ function deploy-adfintegrationruntime($sub, $rg, $adf, $integrationruntime, $inp
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/integrationruntimes/$($integrationruntime)?api-version=2018-06-01"
     $token = (Invoke-AzCmd "az account get-access-token").accessToken
     $template = (get-content -Path $inputfile)
-    $body = $template | convertto-json -depth 10
+    $body = $template | convertto-json -depth 4
     $headers = @{}
     $headers["Authorization"] = "Bearer $token"
     $headers["content-type"] = "application/json"
@@ -184,8 +184,8 @@ function deploy-adfdataflow($sub, $rg, $adf, $dataflow, $inputfile, $folder = $n
 
     $template = (get-content -Path $inputfile | convertfrom-json)
     $template.name = $dataflow
-
-    if ($folder -ne $null) {
+    <#
+    if (($null -eq $folder) -or ($folder -eq "")) {
         if ($template.properties.folder -ne $null) {
             $template.properties.folder.name = $folder
         }
@@ -194,7 +194,8 @@ function deploy-adfdataflow($sub, $rg, $adf, $dataflow, $inputfile, $folder = $n
         }
 
     }
-    $body = $template | convertto-json -Depth 10
+    #>
+    $body = $template | convertto-json -Depth 4
 
     $headers = @{}
     $headers["Authorization"] = "Bearer $token"
@@ -225,20 +226,21 @@ function deploy-adfdataset($sub, $rg, $adf, $dataset, $inputfile, $folder = $nul
     $token = (Invoke-AzCmd "az account get-access-token").accessToken
 
     $template = get-content -Path $inputfile | convertfrom-json
-
-    if ($folder -ne $null) {
+    <#
+    if (($null -eq $folder) -or ($folder -eq "")) {
         if ($template.properties.folder -ne $null) {
             $template.properties.folder.name = $folder
         }
         else {
             $template.properties | add-member -Name "folder" -Value ("{ `"name`": `"$folder`" }" | convertfrom-json) -MemberType NoteProperty
         }
-        $body = $template | convertto-json -Depth 10
+        $body = $template | convertto-json -Depth 4
     }
     else {
         $body = get-content -Path $inputfile
     }
-
+    #>
+    $body = get-content -Path $inputfile
     $headers = @{}
     $headers["Authorization"] = "Bearer $token"
 
@@ -273,7 +275,7 @@ function Deploy-AdfPipeline {
         $folder = $null
     )
     Write-OutLog "Starting restore of pipeline $pipeline in factory $adf in resource group $rg"
-    $pipeline = $pipeline.Replace(" ", "_") 
+    $pipeline = $pipeline.Replace(" ", "_") # GAP is using underscores in their pipeline names
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01"
     $token = (Invoke-AzCmd "az account get-access-token").accessToken
     $template = (get-content -Path $inputfile | convertfrom-json)
@@ -283,7 +285,14 @@ function Deploy-AdfPipeline {
 
     Write-OutLog "Callling REST method: $uri"
     #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
-    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
+    try {
+        Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers -Verbose
+    }
+    catch {
+        $message = $_.Exception
+        Write-OutLog $message -ForegroundColor Red
+        throw "$message"
+    }
 }
 
 function Backup-AdfTrigger {
@@ -327,13 +336,21 @@ function Deploy-AdfTrigger {
             $template.properties | add-member -Name "folder" -Value ("{ `"name`": `"$folder`" }" | convertfrom-json) -MemberType NoteProperty
         }
     }
-    $body = $template | convertto-json -Depth 10
+    $body = $template | convertto-json -Depth 4
     $headers = @{}
     $headers["Authorization"] = "Bearer $token"
 
     Write-OutLog "Callling REST method: $uri"
     #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
-    Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
+    try {
+        Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers -Verbose
+    }
+    catch {
+        $message = $_.Exception
+        Write-OutLog $message -ForegroundColor Red
+        throw "$message"
+    }
+
 }
 
 function ensure-adfdirectory($srcpath) {
@@ -518,10 +535,10 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
         }
 
         #backup integration runtimes
-        $linkedservicesuri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/integrationruntimes?api-version=2018-06-01"
-        foreach ($runtime in (Invoke-AzCmd "az rest --uri $linkedservicesuri --method get")) {
+        $integrationruntimeuri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/integrationruntimes?api-version=2018-06-01"
+        foreach ($runtime in (Invoke-AzCmd "az rest --uri $integrationruntimeuri --method get")) {
             Write-OutLog "Found integration runtime: $($runtime.name)" -ForegroundColor Green
-            backup-adflinkedservice -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $service.name -outputfile "$srcfolder\$($factory.name)\integrationruntimes\$($runtime.name).json"
+            backup-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $service.name -outputfile "$srcfolder\$($factory.name)\integrationruntimes\$($runtime.name).json"
         }
 
         #backup the factory itself
@@ -555,13 +572,24 @@ function restore-factories {
         }
 
         # New/Restore ADF
+        # Pause needed as it fails if created too soon after ADF is created
+        Write-OutLog "Pause for 60 seconds..."
+        Start-Sleep -Seconds 30
+        Write-OutLog "30 seconds left..."
+        Start-Sleep -Seconds 20
+        Write-OutLog "10 seconds left..."
+        Start-Sleep -Seconds 10
         $factoryPrincipalId = (Invoke-AzCmd -cmd "az datafactory list" -deserialize $true | Where-Object { $_.Name -eq "$($factory.name)$suffix" }).identity.principalId 
-        if($null -eq $factoryPrincipalId){ Write-OutLog -msg "Unable to get ID to "}
+        if ($null -eq $factoryPrincipalId) { Write-OutLog -msg "Unable to get ID to " }
         #deploy integration runtimes
         foreach ($runtime in $factory.GetDirectories("integrationruntimes").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories)) {
             # Old/Existing ADF
-            $scope = (Get-Content $runtime.FullName | ConvertFrom-Json -Depth 4).id
-            Invoke-AzCmd -cmd "az role assignment create --role 'Contributor' --assignee-object-id $factoryPrincipalId --scope $scope" -deserialize $false
+            $scope = (Get-Content $runtime.FullName | ConvertFrom-Json -Depth 4).properties.typeproperties.linkedInfo.resourceId
+            Write-OutLog "Scope is $scope"
+            Write-OutLog "Factory Pricipal ID is $factoryPrincipalId"
+            Write-OutLog "Setting Role for Integrated Runtime"
+            if (($null -eq $scope) -or ($scope -eq "") ) { Write-OutLog "Unable to set Integrated Runtime permissions, skipping." }
+            else { Invoke-AzCmd -cmd "az role assignment create --role 'Contributor' --assignee $factoryPrincipalId --scope $scope" -deserialize $false }
             deploy-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -integrationruntime $runtime.BaseName -inputfile $runtime.FullName
         }
 
@@ -577,6 +605,7 @@ function restore-factories {
         foreach ($dataset in $factory.GetDirectories("datasets").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories)) {
             Write-OutLog "found dataset $dataset"
             $folder = $dataset.Directory.FullName.Replace("$($factory.FullName)\datasets", "").Trim("\").Replace("\", "/")
+            if ($null -ne $folder) { Write-OutLog "Folder is $folder" }
             deploy-adfdataset -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -dataset $dataset.BaseName -inputfile $dataset.FullName -folder $folder
         }
 
@@ -584,6 +613,7 @@ function restore-factories {
         foreach ($dataflow in $factory.GetDirectories("dataflows").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories)) {
             Write-OutLog "found dataflow $dataflow"
             $folder = $dataflow.Directory.FullName.Replace("$($factory.FullName)\dataflows", "").Trim("\").Replace("\", "/")
+            if ($null -ne $folder) { Write-OutLog "Folder is $folder" }
             deploy-adfdataflow -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -dataflow $dataflow.BaseName -inputfile $dataflow.FullName -folder $folder
         }
 
@@ -652,24 +682,28 @@ function Deploy-AdfPipelineDependancy {
                 else {
                     Write-OutLog -msg "Dependancy $($get.DependsOn) deployed. Deploying pipeline $($path.BaseName)!" -ForegroundColor Cyan
                     try {
-                        deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf $adf -pipeline $path.BaseName -inputfile $path.FullName -folder $folder
+                        deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf $adf -pipeline $path.BaseName -inputfile $path.FullName 
                         $get.Deployed = "X"
                     }
                     catch {
+                        $message = $_.Exception
                         Write-OutLog -msg "Failed to deploy pipeline $($path.BaseName)"
-                        throw "Failed to deploy pipeline $($path.BaseName)"
+                        Write-OutLog $message -ForegroundColor Red
+                        throw "Failed to deploy pipeline $($path.BaseName): $message"
                     }
                 }
             }
             else {
                 Write-OutLog -msg "$($path.BaseName) Does not have dependancy. Deploying pipeline." -ForegroundColor Green
                 try {
-                    deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf $adf -pipeline $path.BaseName -inputfile $path.FullName -folder $folder
+                    deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf $adf -pipeline $path.BaseName -inputfile $path.FullName
                     $get.Deployed = "X"
                 }
                 catch {
+                    $message = $_.Exception
                     Write-OutLog -msg "Failed to deploy pipeline $($path.BaseName)"
-                    throw "Failed to deploy pipeline $($path.BaseName)"
+                    Write-OutLog $message -ForegroundColor Red
+                    throw "Failed to deploy pipeline $($path.BaseName): $message"
                 }
             }
         }
@@ -693,13 +727,16 @@ function Set-ADFManagedIdentity {
     #az ad sp list --display-name $managedIdName --query [].id --output tsv
     #System Assigned Managed ID
     # No output when using Invoke-AzCmd, need that output
-    $oldaid = az ad sp list --display-name $factoryName --query [].id --output tsv
+    $out = az ad sp list --display-name $factoryName | Convertfrom-Json
+    $oldaid = ($out | Where-Object { $_.displayName -eq $factoryName }).id
+    Write-OutLog "Assignee ID for old ADF is $oldaid"
     #az role assignment list --assignee # uses graph API
     # does not work returnns [] # only works if --all is added
     $roles = az role assignment list --assignee $oldaid --all | ConvertFrom-Json -Depth 4
     Write-OutLog "Role Information: "
     Write-OutLog $roles
     $aid = az ad sp list --display-name $newFactoryName --query [].id --output tsv
+    Write-OutLog "Assignee ID for new ADF is $aid"
     # Assign Role
     foreach ($role in $roles) {
         Invoke-AzCmd -cmd "az role assignment create --assignee ""$aid"" --role ""$($role.roleDefinitionName)"" --scope ""$($role.scope)"" "
