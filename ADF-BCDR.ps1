@@ -538,7 +538,14 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
         $integrationruntimeuri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/integrationruntimes?api-version=2018-06-01"
         foreach ($runtime in (Invoke-AzCmd "az rest --uri $integrationruntimeuri --method get")) {
             Write-OutLog "Found integration runtime: $($runtime.name)" -ForegroundColor Green
-            backup-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $service.name -outputfile "$srcfolder\$($factory.name)\integrationruntimes\$($runtime.name).json"
+            backup-adfintegrationruntime -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $runtime.name -outputfile "$srcfolder\$($factory.name)\integrationruntimes\$($runtime.name).json"
+        }
+        
+        #backup triggers
+        $triggeruri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/triggers?api-version=2018-06-01"
+        foreach ($trigger in (Invoke-AzCmd "az rest --uri $triggeruri --method get")) {
+            Write-OutLog "Found integration runtime: $($trigger.name)" -ForegroundColor Green
+            backup-adftrigger -sub $subscription -rg $resourceGroup -adf $factory.name -linkedservice $trigger.name -outputfile "$srcfolder\$($factory.name)\triggers\$($runtime.name).json"
         }
 
         #backup the factory itself
