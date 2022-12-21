@@ -46,7 +46,10 @@ $vms = @('/subscriptions/(subid)/resourceGroups/(RG)/providers/Microsoft.Compute
 
 Parameters:
 
-ResourceList - should be an array of resourceID's
-DashboardName - the displayname of the output dashboard file
-Outputfile - The JSON file name (or full path) you want it to spit out
-OpenNotepad - a lazy way of getting a look at the fruits of your labor.  Should be boolean value (default is $false)
+**ResourceList** - should be an array of resourceID's
+
+**DashboardName** - the displayname of the output dashboard file
+
+**Outputfile** - The JSON file name (or full path) you want it to spit out
+
+**OpenNotepad** - a lazy way of getting a look at the fruits of your labor.  Should be boolean value (default is $false).  Obviously only works on Windows.
