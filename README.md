@@ -63,6 +63,9 @@ A barebones multi-threaded .Net Core (C#) command line tool for generating HTTP 
 `WebTester.exe -option optionvalue`
 
 `-sleepms` - The time to sleep between making requests.  Default is 0.
+
 `-minutes` - How many minutes to run the test for.  Default is 1.
+
 `-uri` - What URI to hit.  Required.
+
 `-threads` - How many threads to use.  Default is 1.
