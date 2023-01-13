@@ -53,3 +53,16 @@ Parameters:
 **Outputfile** - The JSON file name (or full path) you want it to spit out
 
 **OpenNotepad** - a lazy way of getting a look at the fruits of your labor.  Should be boolean value (default is $false).  Obviously only works on Windows.
+
+## WebTester
+
+A barebones multi-threaded .Net Core (C#) command line tool for generating HTTP requests.  Intended as a platform for tinkering with many variables to see what impact they have.
+
+### Usage
+
+`WebTester.exe -option optionvalue`
+
+`-sleepms` - The time to sleep between making requests.  Default is 0.
+`-minutes` - How many minutes to run the test for.  Default is 1.
+`-uri` - What URI to hit.  Required.
+`-threads` - How many threads to use.  Default is 1.
