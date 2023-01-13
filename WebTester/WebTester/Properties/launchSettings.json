@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "WebTester": {
+      "commandName": "Project",
+      "commandLineArgs": "-uri https://www.google.com"
+    }
+  }
+}
