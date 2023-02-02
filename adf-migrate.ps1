@@ -196,6 +196,8 @@ function deploy-adflinkedservice($sub, $rg, $adf, $linkedservice, $inputfile)
    $token = (run-azcmd "az account get-access-token" -deserialize $false | convertfrom-json).accessToken
 
    $template = despace-template (get-content -Path $inputfile | convertfrom-json)
+   
+   $template.properties.PSObject.Properties.Remove('connectVia')
 
    $template.name = $linkedservice
 
@@ -279,7 +281,7 @@ function deploy-adfdataset($sub, $rg, $adf, $dataset, $inputfile, $folder = $nul
 
    $token = (run-azcmd "az account get-access-token" -deserialize $false | convertfrom-json).accessToken
 
-   $template = get-content -Path $inputfile | convertfrom-json
+   $template = despace-template (get-content -Path $inputfile | convertfrom-json)
 
    if($folder -ne $null)
    {
