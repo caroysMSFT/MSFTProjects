@@ -884,9 +884,9 @@ function restore-factory($sub, $rg, $srcfile, $name = "", $region = "", $exists 
         $folder = $pipeline.Directory.FullName.Replace("$($factory.FullName)\pipelines","").Trim("\").Replace("\","/")
         deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf $name -pipeline $pipeline.BaseName -inputfile $pipeline.FullName -folder $folder
     }
-    
+    <#
     # deploy triggers last
     foreach ($trigger in $factory.GetDirectories("triggers").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories)) {
         Deploy-AdfTrigger -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -trigger $trigger.BaseName -inputfile $trigger.FullName
-    }
+    }#>
 }
