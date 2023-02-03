@@ -74,7 +74,6 @@ function despace-template($json)
 {
     $type = $json.id.split("/")[9]
 
-
     switch($type)
     {
         "pipelines" 
@@ -87,11 +86,30 @@ function despace-template($json)
                     { 
                         $property.dataflow.referenceName = $property.dataflow.referenceName.Replace(" ","_")
                     }
+                    if($property.dataset -ne $null) 
+                    { 
+                        $property.dataset.referenceName = $property.dataset.referenceName.Replace(" ","_")
+                    }
                 }
 
                 foreach($linkedservice in $activity.linkedServiceName)
                 {
                     if($linkedservice.type -eq "LinkedServiceReference") { $linkedservice.referenceName = $linkedservice.referenceName.Replace(" ","_")}
+                }
+
+                foreach($input in $activity.inputs)
+                {
+                    if($input.type -like "*Reference")
+                    {
+                        $input.referenceName = $input.referenceName.Replace(" ","_")
+                    }
+                }
+                foreach($output in $activity.outputs)
+                {
+                    if($output.type -like "*Reference")
+                    {
+                        $output.referenceName = $output.referenceName.Replace(" ","_")
+                    }
                 }
             }
         }
@@ -106,16 +124,31 @@ function despace-template($json)
         {
             foreach($source in $json.properties.typeProperties.sources)
             {
-                if($source.linkedService.type -eq "LinkedServiceReference") { $linkedservice.referenceName = $linkedservice.referenceName.Replace(" ","_")}
+                if($source.linkedService.type -eq "LinkedServiceReference") { $source.referenceName = $source.referenceName.Replace(" ","_")}
+                if($source.dataset.type -eq "DatasetReference") { $source.referenceName = $source.referenceName.Replace(" ","_")}
             }
 
             foreach($sink in $json.properties.typeProperties.sinks)
             {
-                if($sink.linkedService.type -eq "LinkedServiceReference") { $linkedservice.referenceName = $linkedservice.referenceName.Replace(" ","_")}
+                if($sink.linkedService.type -eq "LinkedServiceReference") { $sink.referenceName = $sink.referenceName.Replace(" ","_")}
+                if($sink.dataset.type -eq "DatasetReference") { $sink.referenceName = $sink.referenceName.Replace(" ","_")}
             }
         }
     }
     return $json
+}
+
+function get-pipelinereferences($pipeline)
+{
+    $pipelinelist = @()
+    foreach($item in $template.Values)
+    {
+        if($item["pipeline"] -ne "")
+        {
+            $pipelinelist += $item.referenceName
+        }
+    }
+    return ($pipelinelist | get-unique)
 }
 
 function backup-adffactory($sub, $rg, $adf, $outputfile)
@@ -325,39 +358,61 @@ function backup-adfpipeline($sub, $rg, $adf, $pipeline, $outputfile)
     $json | out-file $outputfile
 }
 
-function deploy-adfpipeline($sub, $rg, $adf, $pipeline, $inputfile, $folder = $null)
-{
-   log "Starting restore of pipeline $pipeline in factory $adf in resource group $rg"
-   $pipeline = $pipeline.Replace(" ","_")
-   
-   $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01"
-   $token = (run-azcmd "az account get-access-token" -deserialize $false | convertfrom-json).accessToken
+function Deploy-AdfPipeline {
+    [CmdletBinding()]
+    param (
+        $sub, 
+        $rg, 
+        $adf, 
+        $pipeline, 
+        $inputfile, 
+        [ref] $donelist
+    )
+    Log "Starting restore of pipeline $pipeline in factory $adf in resource group $rg, file: $inputfile"
+    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01"
+    $token = (Invoke-AzCmd "az account get-access-token").accessToken
+    $template = despace-template (get-content -Path $inputfile | convertfrom-json)
+    $pipeline = $pipeline.Replace(" ","_")
+    $template.name = $pipeline
+    $body = get-content -Path $inputfile
+    $headers = @{}
+    $headers["Authorization"] = "Bearer $token"
 
-   $template = despace-template (get-content -Path $inputfile | convertfrom-json)
-   $template.name = $pipeline
-
-   if($folder -ne $null)
-   {
-
-        if($template.properties.folder -ne $null)
+    $fileobj = get-item $inputfile
+       
+    foreach($reference in get-pipelinereferences -pipeline $template)
+    {
+        if($donelist -notcontains $reference)
         {
-            $template.properties.folder.name = $folder
+            $splat = @{
+                sub            = $sub
+                rg             = $rg  
+                adf            = $adf
+                pipeline       = $reference
+                inputfile      = "$($fileobj.Directory.FullName)\$reference.json"
+                donelist       = $donelist
+            }
+            $donelist
+            deploy-adfpipeline @splat
+            $donelist
         }
-        else
-        {
-            $template.properties | add-member -Name "folder" -Value ("{ `"name`": `"$folder`" }" | convertfrom-json) -MemberType NoteProperty
+    }
+    if($donelist -notcontains $pipeline)
+    {
+        Log "Callling REST method: $uri"
+        #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
+        try {
+            Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers -Verbose
+            Write-Host "Dumping Type Info" -ForegroundColor Yellow
+
+            $donelist.Value += $pipeline           
         }
-        
-   }
-
-   $body = $template | convertto-json -Depth 10
-
-   $headers = @{}
-   $headers["Authorization"] = "Bearer $token"
-
-   log "Callling REST method: $uri"
-   #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
-   Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers 
+        catch {
+            $message = $_.Exception
+            Log $message -ForegroundColor Red
+            throw "$message"
+        }
+    }
 }
 
 function ensure-adfdirectory($srcpath)
