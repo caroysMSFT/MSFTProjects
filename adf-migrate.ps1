@@ -309,13 +309,14 @@ function backup-adfdataset($sub, $rg, $adf, $dataset, $outputfile)
 
 function deploy-adfdataset($sub, $rg, $adf, $dataset, $inputfile, $folder = $null)
 {
+   $dataset = $dataset.Replace(" ","_")
    log "Starting deploy of data set $dataset in factory $adf in resource group $rg"
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/datasets/$($dataset)?api-version=2018-06-01"
 
    $token = (run-azcmd "az account get-access-token" -deserialize $false | convertfrom-json).accessToken
 
    $template = despace-template (get-content -Path $inputfile | convertfrom-json)
-
+   $template.name = $dataset
    if($folder -ne $null)
    {
         if($template.properties.folder -ne $null)
