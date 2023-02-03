@@ -416,25 +416,24 @@ function Deploy-AdfPipeline {
     }
 }
 
-function ensure-adfdirectory($srcpath)
-{
+function ensure-adfdirectory($srcpath) {
     
-    if(Test-Path -Path $srcpath)
-    {
-        log "Path is found; trying to verify subfolders under $srcpath"
-        if(!(Test-Path -Path "$srcpath\pipelines")) { log "Creating pipelines folder:  $srcpath\pipelines"; new-item -path "$srcpath" -ItemType Directory}
-        if(!(Test-Path -Path "$srcpath\datasets")) { log "Creating datasets folder:  $srcpath\datasets"; new-item -path "$srcpath" -ItemType Directory}
-        if(!(Test-Path -Path "$srcpath\linkedservices")) { log "Creating linkedservices folder: $srcpath\linkedservices ";new-item -path "$srcpath" -ItemType Directory}
-        if(!(Test-Path -Path "$srcpath\dataflows")) { log "Creating linkedservices folder:  $srcpath\dataflows";new-item -path "$srcpath" -ItemType Directory}
+    if (Test-Path -Path $srcpath) {
+        Write-OutLog "Path is found; trying to verify subfolders under $srcpath"
+        if (!(Test-Path -Path "$srcpath\pipelines")) { Write-OutLog "Creating pipelines folder:  $srcpath\pipelines"; new-item -path "$srcpath" -ItemType Directory }
+        if (!(Test-Path -Path "$srcpath\datasets")) { Write-OutLog "Creating datasets folder:  $srcpath\datasets"; new-item -path "$srcpath" -ItemType Directory }
+        if (!(Test-Path -Path "$srcpath\linkedservices")) { Write-OutLog "Creating linkedservices folder: $srcpath\linkedservices "; new-item -path "$srcpath" -ItemType Directory }
+        if (!(Test-Path -Path "$srcpath\dataflows")) { Write-OutLog "Creating linkedservices folder:  $srcpath\dataflows"; new-item -path "$srcpath" -ItemType Directory }
+        if (!(Test-Path -Path "$srcpath\triggers")) { Write-OutLog "Creating linkedservices folder:  $srcpath\triggers"; new-item -path "$srcpath" -ItemType Directory }
     }
-    else
-    {
-        log "Creating $srcpath from scratch...";
+    else {
+        Write-OutLog "Creating $srcpath from scratch...";
         new-item -path "$srcpath" -ItemType Directory
         new-item -path "$srcpath\pipelines" -ItemType Directory
         new-item -path "$srcpath\datasets" -ItemType Directory
         new-item -path "$srcpath\linkedservices" -ItemType Directory
         new-item -path "$srcpath\dataflows" -ItemType Directory
+        new-item -path "$srcpath\triggers" -ItemType Directory
     }
 }
 
@@ -713,6 +712,13 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
                 log "Linked Service $($service.name) not referenced by a recently run pipeline or data set; skipping..." -foregroundcolor Yellow
             }
         }
+        
+        #backup triggers
+        $triggeruri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/triggers?api-version=2018-06-01"
+        foreach ($trigger in (Invoke-AzCmd "az rest --uri $triggeruri --method get")) {
+            Write-OutLog "Found trigger: $($trigger.name)" -ForegroundColor Green
+            backup-adftrigger -sub $subscription -rg $resourceGroup -adf $factory.name -trigger $trigger.name -outputfile "$srcfolder\$($factory.name)\triggers\$($trigger.name).json"
+        }
 
         #backup the factory itself
         backup-adffactory -sub $subscription -rg $resourceGroup -adf $factory.name -outputfile "$srcfolder\$($factory.name)\$($factory.name).json"
@@ -773,6 +779,53 @@ function restore-factories($sub, $rg, $srcfolder, $suffix = "", $region = "")
     }
 }
 
+function Backup-AdfTrigger {
+    [CmdletBinding()]
+    param (
+        $sub, 
+        $rg, 
+        $adf, 
+        $trigger, 
+        $outputfile
+    )
+    Write-OutLog "Starting backup of trigger $trigger in factory $adf in resource group $rg"
+    # Get the pipeline via AZ CLI - gives us the cleanest JSON
+    $uri = "`'https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/triggers/$($trigger)?api-version=2018-06-01`'"
+    #"`'https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.DataFactory/factories/{factoryName}/pipelines/{pipelineName}?api-version=2018-06-01`'"
+    $json = Invoke-AzCmd "az rest --uri $uri --method get"  -deserialize $false
+    $json | out-file $outputfile
+}
+
+function Deploy-AdfTrigger {
+    [CmdletBinding()]
+    param (
+        $sub, 
+        $rg, 
+        $adf, 
+        $trigger, 
+        $inputfile, 
+        $folder = $null
+    )
+    Write-OutLog "Starting restore of trigger $trigger in factory $adf in resource group $rg"
+    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/triggers/$($trigger)?api-version=2018-06-01"
+    $token = (Invoke-AzCmd "az account get-access-token").accessToken
+    $body = get-content -Path 
+
+    $headers = @{}
+    $headers["Authorization"] = "Bearer $token"
+
+    Write-OutLog "Callling REST method: $uri"
+    #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
+    try {
+        Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers -Verbose
+    }
+    catch {
+        $message = $_.ErrorDetails.Message
+        Write-OutLog $message -ForegroundColor Red
+        throw "$message"
+    }
+}
+
 # Exists flag is there to tell this function not to deploy the factory - useful for pushing artifacts to an existing factory which had nothing to do with the source.
 # There's not that much that is inherited from the factory itself (region, identity), so this is a worthwhile exercise.
 function restore-factory($sub, $rg, $srcfile, $name = "", $region = "", $exists = $false)
@@ -824,11 +877,16 @@ function restore-factory($sub, $rg, $srcfile, $name = "", $region = "", $exists 
         deploy-adfdataflow -sub $subscription -rg $resourceGroup -adf $name -dataflow $dataflow.BaseName -inputfile $dataflow.FullName -folder $folder
     }
 
-    #deploy pipelines last
+    #deploy pipelines 
     foreach($pipeline in $srcfileobj.directory.GetDirectories("pipelines").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories))
     {
         log "found pipeline $pipeline"
         $folder = $pipeline.Directory.FullName.Replace("$($factory.FullName)\pipelines","").Trim("\").Replace("\","/")
         deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf $name -pipeline $pipeline.BaseName -inputfile $pipeline.FullName -folder $folder
+    }
+    
+    # deploy triggers last
+    foreach ($trigger in $factory.GetDirectories("triggers").GetFiles("*.json", [System.IO.SearchOption]::AllDirectories)) {
+        Deploy-AdfTrigger -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -trigger $trigger.BaseName -inputfile $trigger.FullName
     }
 }
