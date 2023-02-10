@@ -70,85 +70,62 @@ function run-azcmd($cmd, $deserialize = $true)
     }
 }
 
-function despace-template($json)
+function despace-template([ref]$json)
 {
-    $type = $json.id.split("/")[9]
-
-    switch($type)
+    foreach($item in $json.Value.PSObject.Properties)
     {
-        "pipelines" 
+        if($item.MemberType -eq "NoteProperty")
         {
-            foreach($activity in $json.properties.activities)
+            if($item.name -like "referenceName")
             {
-                foreach($property in $activity.typeProperties)
-                {
-                    if($property.dataflow -ne $null) 
-                    { 
-                        $property.dataflow.referenceName = $property.dataflow.referenceName.Replace(" ","_")
-                    }
-                    if($property.dataset -ne $null) 
-                    { 
-                        $property.dataset.referenceName = $property.dataset.referenceName.Replace(" ","_")
-                    }
-                }
-
-                foreach($linkedservice in $activity.linkedServiceName)
-                {
-                    if($linkedservice.type -eq "LinkedServiceReference") { $linkedservice.referenceName = $linkedservice.referenceName.Replace(" ","_")}
-                }
-
-                foreach($input in $activity.inputs)
-                {
-                    if($input.type -like "*Reference")
-                    {
-                        $input.referenceName = $input.referenceName.Replace(" ","_")
-                    }
-                }
-                foreach($output in $activity.outputs)
-                {
-                    if($output.type -like "*Reference")
-                    {
-                        $output.referenceName = $output.referenceName.Replace(" ","_")
-                    }
-                }
-            }
-        }
-        "datasets" 
-        {
-            foreach($linkedservice in $json.properties.linkedServiceName)
-            {
-                if($linkedservice.type -eq "LinkedServiceReference") { $linkedservice.referenceName = $linkedservice.referenceName.Replace(" ","_")}
-            }
-        }
-        "dataflows" 
-        {
-            foreach($source in $json.properties.typeProperties.sources)
-            {
-                if($source.linkedService.type -eq "LinkedServiceReference") { $source.referenceName = $source.referenceName.Replace(" ","_")}
-                if($source.dataset.type -eq "DatasetReference") { $source.referenceName = $source.referenceName.Replace(" ","_")}
+                $item
+                write-host "replacing spaces for $($json.Value.referenceName)"
+                $json.Value.referenceName = $json.Value.referenceName.Replace(" ","_")
             }
 
-            foreach($sink in $json.properties.typeProperties.sinks)
+            if($item.TypeNameOfValue -eq "System.Object[]")
             {
-                if($sink.linkedService.type -eq "LinkedServiceReference") { $sink.referenceName = $sink.referenceName.Replace(" ","_")}
-                if($sink.dataset.type -eq "DatasetReference") { $sink.referenceName = $sink.referenceName.Replace(" ","_")}
+                foreach($object in $item.Value)
+                {
+                    #Write-Host "Despacing another layer deep for array..."
+                    despace-template ([ref]$object)
+                }
+            }
+            else
+            {
+                #Write-Host "Despacing another layer deep for properties..."
+                despace-template ([ref]$item.Value)
             }
         }
     }
-    return $json
 }
 
-function get-pipelinereferences($pipeline)
+function get-references($json, $match)
 {
-    $pipelinelist = @()
-    foreach($item in $template.Values)
+    $references = @()
+    foreach($item in $json.PSObject.Properties)
     {
-        if($item["pipeline"] -ne "")
+        if($item.MemberType -eq "NoteProperty")
         {
-            $pipelinelist += $item.referenceName
+            if($item.name -eq "type" -and $json.type -eq $match)
+            {
+                $references += $json.referenceName
+            }
+
+            if($item.TypeNameOfValue -eq "System.Object[]")
+            {
+                foreach($object in $item.Value)
+                {
+                    $references += get-references $object -match $match
+                }
+            }
+            else
+            {
+                $references += get-references $item.Value -match $match
+            }
         }
     }
-    return ($pipelinelist | get-unique)
+    return ($references | select-object -Unique)
 }
 
 function backup-adffactory($sub, $rg, $adf, $outputfile)
@@ -227,8 +204,8 @@ function deploy-adflinkedservice($sub, $rg, $adf, $linkedservice, $inputfile)
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/linkedservices/$($linkedservice)?api-version=2018-06-01"
 
    $token = (run-azcmd "az account get-access-token" -deserialize $false | convertfrom-json).accessToken
-
-   $template = despace-template (get-content -Path $inputfile | convertfrom-json)
+   $template = (get-content -Path $inputfile | convertfrom-json)
+   despace-template ([ref]$template)
    
    $template.properties.PSObject.Properties.Remove('connectVia')
 
@@ -265,8 +242,8 @@ function deploy-adfdataflow($sub, $rg, $adf, $dataflow, $inputfile, $folder = $n
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/dataFlows/$($dataflow)?api-version=2018-06-01"
 
    $token = (run-azcmd "az account get-access-token" -deserialize $false | convertfrom-json).accessToken
-
-   $template = despace-template (get-content -Path $inputfile | convertfrom-json)
+   $template = (get-content -Path $inputfile | convertfrom-json)
+   despace-template ([ref]$template)
    $template.name = $dataflow
 
    if($folder -ne $null)
@@ -314,8 +291,8 @@ function deploy-adfdataset($sub, $rg, $adf, $dataset, $inputfile, $folder = $nul
    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/datasets/$($dataset)?api-version=2018-06-01"
 
    $token = (run-azcmd "az account get-access-token" -deserialize $false | convertfrom-json).accessToken
-
-   $template = despace-template (get-content -Path $inputfile | convertfrom-json)
+   $template = (get-content -Path $inputfile | convertfrom-json)
+   despace-template ([ref]$template)
    $template.name = $dataset
    if($folder -ne $null)
    {
@@ -371,17 +348,18 @@ function Deploy-AdfPipeline {
     )
     Log "Starting restore of pipeline $pipeline in factory $adf in resource group $rg, file: $inputfile"
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01"
-    $token = (Invoke-AzCmd "az account get-access-token").accessToken
-    $template = despace-template (get-content -Path $inputfile | convertfrom-json)
+    $token = (run-azcmd "az account get-access-token" -deserialize $false | convertfrom-json).accessToken
+    $template = (get-content -Path $inputfile | convertfrom-json)
+    despace-template ([ref]$template)
     $pipeline = $pipeline.Replace(" ","_")
     $template.name = $pipeline
-    $body = get-content -Path $inputfile
+    $body =  $template | convertto-json -depth 100
     $headers = @{}
     $headers["Authorization"] = "Bearer $token"
 
     $fileobj = get-item $inputfile
        
-    foreach($reference in get-pipelinereferences -pipeline $template)
+    foreach($reference in get-references -json $template -match "PipelineReference")
     {
         if($donelist -notcontains $reference)
         {
@@ -404,7 +382,6 @@ function Deploy-AdfPipeline {
         #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
         try {
             Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers -Verbose
-            Write-Host "Dumping Type Info" -ForegroundColor Yellow
 
             $donelist.Value += $pipeline           
         }
@@ -419,15 +396,15 @@ function Deploy-AdfPipeline {
 function ensure-adfdirectory($srcpath) {
     
     if (Test-Path -Path $srcpath) {
-        Write-OutLog "Path is found; trying to verify subfolders under $srcpath"
-        if (!(Test-Path -Path "$srcpath\pipelines")) { Write-OutLog "Creating pipelines folder:  $srcpath\pipelines"; new-item -path "$srcpath" -ItemType Directory }
-        if (!(Test-Path -Path "$srcpath\datasets")) { Write-OutLog "Creating datasets folder:  $srcpath\datasets"; new-item -path "$srcpath" -ItemType Directory }
-        if (!(Test-Path -Path "$srcpath\linkedservices")) { Write-OutLog "Creating linkedservices folder: $srcpath\linkedservices "; new-item -path "$srcpath" -ItemType Directory }
-        if (!(Test-Path -Path "$srcpath\dataflows")) { Write-OutLog "Creating linkedservices folder:  $srcpath\dataflows"; new-item -path "$srcpath" -ItemType Directory }
-        if (!(Test-Path -Path "$srcpath\triggers")) { Write-OutLog "Creating linkedservices folder:  $srcpath\triggers"; new-item -path "$srcpath" -ItemType Directory }
+        log "Path is found; trying to verify subfolders under $srcpath"
+        if (!(Test-Path -Path "$srcpath\pipelines")) { log "Creating pipelines folder:  $srcpath\pipelines"; new-item -path "$srcpath" -ItemType Directory }
+        if (!(Test-Path -Path "$srcpath\datasets")) { log "Creating datasets folder:  $srcpath\datasets"; new-item -path "$srcpath" -ItemType Directory }
+        if (!(Test-Path -Path "$srcpath\linkedservices")) { log "Creating linkedservices folder: $srcpath\linkedservices "; new-item -path "$srcpath" -ItemType Directory }
+        if (!(Test-Path -Path "$srcpath\dataflows")) { log "Creating linkedservices folder:  $srcpath\dataflows"; new-item -path "$srcpath" -ItemType Directory }
+        if (!(Test-Path -Path "$srcpath\triggers")) { log "Creating linkedservices folder:  $srcpath\triggers"; new-item -path "$srcpath" -ItemType Directory }
     }
     else {
-        Write-OutLog "Creating $srcpath from scratch...";
+        log "Creating $srcpath from scratch...";
         new-item -path "$srcpath" -ItemType Directory
         new-item -path "$srcpath\pipelines" -ItemType Directory
         new-item -path "$srcpath\datasets" -ItemType Directory
@@ -458,118 +435,6 @@ function check-pipelinelastrun($adf, $rg, $pipeline, [int]$months = 8)
     return ([DateTime]::Compare($lastRun,[DateTime]::Now.AddMonths($months * -1)) -gt 0)
 }
 
-function get-datasets($json)
-{
-    $type = $json.id.split("/")[9]
-    $datasets = @()
-
-    switch($type)
-    {
-        "pipelines" 
-        {
-            foreach($activity in $json.properties.activities)
-            {
-                log "checking activity $($activity.name) for pipeline $($json.name)"
-                foreach($input in $activity.inputs)
-                {
-                    if($input.type -eq "DatasetReference") 
-                    { 
-                        log "found dataset $($input.referenceName) for pipeline $($json.name)"
-                        $datasets += $input.referenceName
-                    }
-                }
-
-                foreach($output in $activity.outputs)
-                {
-                    if($output.type -eq "DatasetReference") 
-                    { 
-                        log "found dataset $($output.referenceName) for pipeline $($json.name)"
-                        $datasets += $output.referenceName
-                    }
-                }
-            }
-        }
-        "dataflows" 
-        {
-            foreach($source in $json.properties.typeProperties.sources)
-            {
-                if($source.dataset.type -eq "DatasetReference") { $datasets += $source.dataset.referenceName}
-            }
-
-            foreach($sink in $json.properties.typeProperties.sinks)
-            {
-                if($sink.dataset.type -eq "DatasetReference") { $datasets += $sink.dataset.referenceName}
-            }
-            
-        }
-    }
-    return $datasets
-}
-
-function get-dataflows($json)
-{
-    $type = $json.id.split("/")[9]
-    $dataflows = @()
-
-    switch($type)
-    {
-        "pipelines" 
-        {
-            foreach($activity in $json.properties.activities)
-            {
-                foreach($property in $activity.typeProperties)
-                {
-                    if($property.dataflow -ne $null) 
-                    { 
-                        $dataflows += $property.dataflow.referenceName
-                    }
-                }
-            }
-        }
-    }
-    return $dataflows
-}
-
-
-function get-linkedservices($json)
-{
-    $type = $json.id.split("/")[9]
-    $linkedservices = @()
-
-    switch($type)
-    {
-        "pipelines" 
-        {
-            foreach($activity in $json.properties.activities)
-            {
-                foreach($linkedservice in $activity.linkedServiceName)
-                {
-                    if($linkedservice.type -eq "LinkedServiceReference") { $linkedservices += $linkedservice.referenceName}
-                }
-            }
-        }
-        "datasets" 
-        {
-            foreach($linkedservice in $json.properties.linkedServiceName)
-            {
-                if($linkedservice.type -eq "LinkedServiceReference") { $linkedservices += $linkedservice.referenceName}
-            }
-        }
-        "dataflows" 
-        {
-            foreach($source in $json.properties.typeProperties.sources)
-            {
-                if($source.linkedService.type -eq "LinkedServiceReference") { $linkedservices += $source.linkedService.referenceName}
-            }
-
-            foreach($sink in $json.properties.typeProperties.sinks)
-            {
-                if($sink.linkedService.type -eq "LinkedServiceReference") { $linkedservices += $sink.linkedService.referenceName}
-            }
-        }
-    }
-    return $linkedservices
-}
 
 function get-dataflowdatasets($dataflows, $factory, $resourceGroup, $subscription)
 {
@@ -580,7 +445,7 @@ function get-dataflowdatasets($dataflows, $factory, $resourceGroup, $subscriptio
     {
         $dataflowuri = "`'https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory)/dataFlows/$($dataflow)?api-version=2018-06-01`'"
         $dataflowobj = (run-azcmd "az rest --uri $dataflowuri --method get")
-        $datasets += (get-datasets $dataflowobj)
+        $datasets += (get-references -json $dataflowobj -match "DatasetReference")
     }
     return $datasets
 }
@@ -588,9 +453,9 @@ function get-dataflowdatasets($dataflows, $factory, $resourceGroup, $subscriptio
 
 
 
-function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $lookbackMonths = 12)
+function backup-factories($subscription, $resourceGroup, $srcfolder, $filter = $false, $lookbackMonths = 12)
 {
-    log "Backup factories running on sub: $sub with RG: $resourceGroup with source folder: $srcfolder"
+    log "Backup factories running on sub: $subscription with RG: $resourceGroup with source folder: $srcfolder"
     $factories = (run-azcmd "az resource list --resource-group $resourceGroup --resource-type `"Microsoft.Datafactory/factories`"")
     foreach($factory in $factories)
     {
@@ -624,10 +489,10 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
                     $outputfile = "$srcfolder\$($factory.name)\pipelines\$($pipeline.name).json"
                 }
 
-                $datasets += (get-datasets $pipeline)
-                $dataflows += (get-dataflows $pipeline)
+                $datasets += (get-references -json $pipeline -match "DatasetReference" )
+                $dataflows += (get-references -json $pipeline -match "DataFlowReference" )
                 $datasets += (get-dataflowdatasets -dataflows $dataflows -factory $factory.name -resourcegroup $resourceGroup -subscription $subscription)
-                $linkedservices += (get-linkedservices $pipeline)
+                $linkedservices += (get-references -json $pipeline -match "LinkedServiceReference" )
 
                 log "found pipeline datasets:  " -foregroundcolor Green
                 $datasets
@@ -715,8 +580,8 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
         
         #backup triggers
         $triggeruri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/triggers?api-version=2018-06-01"
-        foreach ($trigger in (Invoke-AzCmd "az rest --uri $triggeruri --method get")) {
-            Write-OutLog "Found trigger: $($trigger.name)" -ForegroundColor Green
+        foreach ($trigger in (run-azcmd "az rest --uri $triggeruri --method get")) {
+            log "Found trigger: $($trigger.name)" -ForegroundColor Green
             backup-adftrigger -sub $subscription -rg $resourceGroup -adf $factory.name -trigger $trigger.name -outputfile "$srcfolder\$($factory.name)\triggers\$($trigger.name).json"
         }
 
@@ -727,7 +592,7 @@ function backup-factories($sub, $resourceGroup, $srcfolder, $filter = $false, $l
 }
 
 
-function restore-factories($sub, $rg, $srcfolder, $suffix = "", $region = "")
+function restore-factories($subscription, $resourceGroup, $srcfolder, $suffix = "", $region = "")
 {
     log "Restore factories running on sub: $sub with RG: $resourceGroup with source folder: $srcfolder"
     $srcdir = get-item -Path $srcfolder
@@ -774,7 +639,8 @@ function restore-factories($sub, $rg, $srcfolder, $suffix = "", $region = "")
         {
             log "found pipeline $pipeline"
             $folder = $pipeline.Directory.FullName.Replace("$($factory.FullName)\pipelines","").Trim("\").Replace("\","/")
-            deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -pipeline $pipeline.BaseName -inputfile $pipeline.FullName -folder $folder
+            $donelist = @()
+            deploy-adfpipeline -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -pipeline $pipeline.BaseName -inputfile $pipeline.FullName  -donelist ([ref]$donelist)
         }
     }
 }
@@ -788,11 +654,11 @@ function Backup-AdfTrigger {
         $trigger, 
         $outputfile
     )
-    Write-OutLog "Starting backup of trigger $trigger in factory $adf in resource group $rg"
+    log "Starting backup of trigger $trigger in factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "`'https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/triggers/$($trigger)?api-version=2018-06-01`'"
     #"`'https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.DataFactory/factories/{factoryName}/pipelines/{pipelineName}?api-version=2018-06-01`'"
-    $json = Invoke-AzCmd "az rest --uri $uri --method get"  -deserialize $false
+    $json = run-azcmd "az rest --uri $uri --method get"  -deserialize $false
     $json | out-file $outputfile
 }
 
@@ -806,22 +672,22 @@ function Deploy-AdfTrigger {
         $inputfile, 
         $folder = $null
     )
-    Write-OutLog "Starting restore of trigger $trigger in factory $adf in resource group $rg"
+    log "Starting restore of trigger $trigger in factory $adf in resource group $rg"
     $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/triggers/$($trigger)?api-version=2018-06-01"
-    $token = (Invoke-AzCmd "az account get-access-token").accessToken
+    $token = (run-azcmd "az account get-access-token").accessToken
     $body = get-content -Path 
 
     $headers = @{}
     $headers["Authorization"] = "Bearer $token"
 
-    Write-OutLog "Callling REST method: $uri"
+    log "Callling REST method: $uri"
     #Using REST call direct, as AZ CLI has some validation which the pipeline JSON doesn't pass for some reason.
     try {
         Invoke-RestMethod -Method Put -Uri $uri -body $body -Headers $headers -Verbose
     }
     catch {
         $message = $_.ErrorDetails.Message
-        Write-OutLog $message -ForegroundColor Red
+        log $message -ForegroundColor Red
         throw "$message"
     }
 }
