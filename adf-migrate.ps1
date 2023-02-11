@@ -78,7 +78,6 @@ function despace-template([ref]$json)
         {
             if($item.name -like "referenceName")
             {
-                $item
                 write-host "replacing spaces for $($json.Value.referenceName)"
                 $json.Value.referenceName = $json.Value.referenceName.Replace(" ","_")
             }
@@ -320,20 +319,47 @@ function deploy-adfdataset($sub, $rg, $adf, $dataset, $inputfile, $folder = $nul
 }
 
 
-function backup-adfpipeline($sub, $rg, $adf, $pipeline, $outputfile)
+function backup-adfpipeline($sub, $rg, $adf, $pipeline, $outputfolder)
 {
     log "Starting backup of pipeline $pipeline in factory $adf in resource group $rg"
     # Get the pipeline via AZ CLI - gives us the cleanest JSON
     $uri = "`'https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01`'"
 
     #"`'https://management.azure.com/subscriptions/{subscriptionId}/resourceGroups/{resourceGroupName}/providers/Microsoft.DataFactory/factories/{factoryName}/pipelines/{pipelineName}?api-version=2018-06-01`'"
-    $json = run-azcmd "az rest --uri $uri --method get"  -deserialize $false
+    $json = run-azcmd "az rest --uri $uri --method get"
 
-    <# We can use this verbatim - no fixup needed.
+    #See if it has a Folder element declared; if so, create a subfolder.
+    if($json.folder -ne $null)
+    {
+        new-item -ItemType Directory -Path "$outputfolder\$($pipeline.folder.name)" -force
+        $outputfile = "$outputfolder\$($pipeline.folder.name)\$($json.name).json"
+    }
+    else
+    {
+        $outputfile = "$outputfolder\$($json.name).json"
+    }
+
+    # If it's already backed up - noop
+    if(test-path $outputfile)
+    {
+        Write-host "Pipeline file already exists, skipping backup: $outputfile"
+    }
+    else
+    {
+        # Backup any referenced pipelines - there can be conditionals which mean references run less often than the parent
+        foreach($pipelineref in (get-references -json $json -match "PipelineReference"))
+        {
+            Write-Host "Found pipeline reference $pipelineref,  Backing it up first..." -foreground Yellow
+            backup-adfpipeline -sub $sub -rg $rg -adf $adf -pipeline $pipelineref -outputfolder $outputfolder
+        }
+        <# Finally, deploy original pipeline
+        
+        We can use this verbatim - no fixup needed.
     
-    There's some extra stuff in the JSON, like ETAG, modified time, etc.  But this gets stripped when you publish it.  
-    Meanwhile, it's data which is useful in source control as forensic/historical info.#>
-    $json | out-file $outputfile
+        There's some extra stuff in the JSON, like ETAG, modified time, etc.  But this gets stripped when you publish it.  
+        Meanwhile, it's data which is useful in source control as forensic/historical info.#>
+        ($json | convertto-json -depth 100) | out-file $outputfile
+    }
 }
 
 function Deploy-AdfPipeline {
@@ -478,31 +504,24 @@ function backup-factories($subscription, $resourceGroup, $srcfolder, $filter = $
             if(($Filter -and (check-pipelinelastrun -adf $factory.name -rg $resourceGroup -pipeline $pipeline.name -months $lookbackMonths)) -or !($Filter)) 
             {
                 log "Found pipeline: $($pipeline.name)" -ForegroundColor Green
-                #See if it has a Folder element declared; if so, create a subfolder.
-                if($pipeline.folder -ne $null)
-                {
-                    new-item -ItemType Directory -Path "$srcfolder\$($factory.name)\pipelines\$($pipeline.folder.name)" -force
-                    $outputfile = "$srcfolder\$($factory.name)\pipelines\$($pipeline.folder.name)\$($pipeline.name).json"
-                }
-                else
-                {
-                    $outputfile = "$srcfolder\$($factory.name)\pipelines\$($pipeline.name).json"
-                }
+                $outputfolder = "$srcfolder\$($factory.name)\pipelines"
 
-                $datasets += (get-references -json $pipeline -match "DatasetReference" )
-                $dataflows += (get-references -json $pipeline -match "DataFlowReference" )
-                $datasets += (get-dataflowdatasets -dataflows $dataflows -factory $factory.name -resourcegroup $resourceGroup -subscription $subscription)
-                $linkedservices += (get-references -json $pipeline -match "LinkedServiceReference" )
-
-                log "found pipeline datasets:  " -foregroundcolor Green
-                $datasets
-                log "found pipeline dataflows: " -foregroundcolor Green
-                $dataflows
-                log "found pipeline linkedservices: " -foregroundcolor Green
-                $linkedservices
-                backup-adfpipeline -sub $subscription -rg $resourceGroup -adf $factory.name -pipeline $pipeline.name -outputfile $outputfile
+                backup-adfpipeline -sub $subscription -rg $resourceGroup -adf $factory.name -pipeline $pipeline.name -outputfolder $outputfolder
             }
         }
+        $pipelinesfolder =  get-item "$srcfolder\$($factory.name)\pipelines"
+        foreach($pipeline in $pipelinesfolder.GetFiles("*.json", [System.IO.SearchOption]::AllDirectories))
+        {
+            $json =  Get-Content -Path $pipeline.FullName | convertfrom-json
+            $datasets += (get-references -json $pipeline -match "DatasetReference" )
+            $dataflows += (get-references -json $pipeline -match "DataFlowReference" )
+            $datasets += (get-dataflowdatasets -dataflows $dataflows -factory $factory.name -resourcegroup $resourceGroup -subscription $subscription)
+            $linkedservices += (get-references -json $pipeline -match "LinkedServiceReference" )
+        }
+
+        #Data flows can reference LinkedServices and DataSets
+        #What if we have a linkedservice or dataset, which isn't referenced by a pipeline recently run, but it is referenced by a dataflow?
+        # this is a real problem.  We should iterate when we're done for referenced data flows, and build the list of datasets and linked services off it.
 
         #backup dataflows
         $dataflowuri = "`'https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/dataflows?api-version=2018-06-01`'"
@@ -517,7 +536,7 @@ function backup-factories($subscription, $resourceGroup, $srcfolder, $filter = $
                 # Logically keeping all dataflows also means, we shouldn't be tracking which linked services they reference.
                 # and we might end up backing up nearly all datasets and linked services
                 # $linkedservices += (get-linkedservices $dataflow)
-                $datasets += (get-datasets $dataflow)  
+                $datasets += (get-references -json $pipeline -match "DataFlowReference" )
                 if($dataflow.properties.folder -ne $null)
                 {
                     new-item -ItemType Directory -Path "$srcfolder\$($factory.name)\dataflows\$($dataflow.properties.folder.name)" -Force
@@ -535,6 +554,17 @@ function backup-factories($subscription, $resourceGroup, $srcfolder, $filter = $
             #} 
         }
 
+        $dataflowfolder =  get-item "$srcfolder\$($factory.name)\dataflows"
+        foreach($dataflow in $dataflows)
+        {
+            foreach($dataflowfile in $dataflowfolder.GetFiles("$dataflow.json", [System.IO.SearchOption]::AllDirectories))
+            {
+                $json = Get-Content -path $dataflowfile.FullName | convertfrom-json
+                $datasets += (get-dataflowdatasets -dataflows $dataflows -factory $factory.name -resourcegroup $resourceGroup -subscription $subscription)
+                $linkedservices += (get-references -json $json -match "LinkedServiceReference" )
+            }
+        }
+
         #backup datasets
         $dataseturi = "`'https://management.azure.com/subscriptions/$subscription/resourceGroups/$resourceGroup/providers/Microsoft.DataFactory/factories/$($factory.name)/datasets?api-version=2018-06-01`'"
 
@@ -545,7 +575,7 @@ function backup-factories($subscription, $resourceGroup, $srcfolder, $filter = $
                 log "Found data set: $($dataset.name)" -ForegroundColor Green
 
                 # add its linked services to our recently used list
-                $linkedservices += (get-linkedservices $dataset)
+                $linkedservices += (get-references -json $pipeline -match "LinkedServiceReference" )
 
                 if($dataset.properties.folder -ne $null)
                 {
@@ -561,6 +591,16 @@ function backup-factories($subscription, $resourceGroup, $srcfolder, $filter = $
             else
             {
                 log "Data flow $($dataset.name) not referenced by a recently run pipeline; skipping..." -foregroundcolor Yellow
+            }
+        }
+
+        $datasetfolder =  get-item "$srcfolder\$($factory.name)\datasets"
+        foreach($dataset in $datasets)
+        {
+            foreach($datasetfile in $datasetfolder.GetFiles("$dataset.json", [System.IO.SearchOption]::AllDirectories))
+            {
+                $json = Get-Content -path $datasetfile.FullName | convertfrom-json
+                $linkedservices += (get-references -json $json -match "LinkedServiceReference" )
             }
         }
 
@@ -756,3 +796,9 @@ function restore-factory($sub, $rg, $srcfile, $name = "", $region = "", $exists 
         Deploy-AdfTrigger -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -trigger $trigger.BaseName -inputfile $trigger.FullName
     }#>
 }
+
+
+az account set --subscription "aebde77f-7119-4eaf-be37-0e59991667aa" 
+
+#restore-factories -subscription "e36582a6-9e0c-4644-9b78-592ffe29a705" -resourceGroup "DataFactory" -srcfolder "C:\Projects\adf_migraton_02082023\ADF-02082023-3M" -suffix "-CARY"
+backup-factories  -subscription "aebde77f-7119-4eaf-be37-0e59991667aa" -resourceGroup "126ADFTutorialResourceGroup" -srcfolder "C:\Projects\adf_migraton_02082023\test"
