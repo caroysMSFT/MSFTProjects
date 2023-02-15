@@ -513,10 +513,10 @@ function backup-factories($subscription, $resourceGroup, $srcfolder, $filter = $
         foreach($pipeline in $pipelinesfolder.GetFiles("*.json", [System.IO.SearchOption]::AllDirectories))
         {
             $json =  Get-Content -Path $pipeline.FullName | convertfrom-json
-            $datasets += (get-references -json $pipeline -match "DatasetReference" )
-            $dataflows += (get-references -json $pipeline -match "DataFlowReference" )
+            $datasets += (get-references -json $json -match "DatasetReference" )
+            $dataflows += (get-references -json $json -match "DataFlowReference" )
             $datasets += (get-dataflowdatasets -dataflows $dataflows -factory $factory.name -resourcegroup $resourceGroup -subscription $subscription)
-            $linkedservices += (get-references -json $pipeline -match "LinkedServiceReference" )
+            $linkedservices += (get-references -json $json -match "LinkedServiceReference" )
         }
 
         #Data flows can reference LinkedServices and DataSets
@@ -796,9 +796,3 @@ function restore-factory($sub, $rg, $srcfile, $name = "", $region = "", $exists 
         Deploy-AdfTrigger -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -trigger $trigger.BaseName -inputfile $trigger.FullName
     }#>
 }
-
-
-az account set --subscription "aebde77f-7119-4eaf-be37-0e59991667aa" 
-
-#restore-factories -subscription "e36582a6-9e0c-4644-9b78-592ffe29a705" -resourceGroup "DataFactory" -srcfolder "C:\Projects\adf_migraton_02082023\ADF-02082023-3M" -suffix "-CARY"
-backup-factories  -subscription "aebde77f-7119-4eaf-be37-0e59991667aa" -resourceGroup "126ADFTutorialResourceGroup" -srcfolder "C:\Projects\adf_migraton_02082023\test"
