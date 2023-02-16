@@ -86,14 +86,38 @@ function despace-template([ref]$json)
             {
                 foreach($object in $item.Value)
                 {
-                    #Write-Host "Despacing another layer deep for array..."
                     despace-template ([ref]$object)
                 }
             }
             else
             {
-                #Write-Host "Despacing another layer deep for properties..."
                 despace-template ([ref]$item.Value)
+            }
+        }
+    }
+}
+
+function unpin-shir([ref]$json)
+{
+    foreach($item in $json.Value.PSObject.Properties)
+    {
+        if($item.MemberType -eq "NoteProperty")
+        {
+            if($item.name -like "integrationRuntime")
+            {
+                $json.Value.PSOBJECT.Properties.Remove('integrationRuntime')
+            }
+
+            if($item.TypeNameOfValue -eq "System.Object[]")
+            {
+                foreach($object in $item.Value)
+                {
+                    unpin-shir ([ref]$object)
+                }
+            }
+            else
+            {
+                unpin-shir ([ref]$item.Value)
             }
         }
     }
@@ -373,13 +397,14 @@ function Deploy-AdfPipeline {
         [ref] $donelist
     )
     Log "Starting restore of pipeline $pipeline in factory $adf in resource group $rg, file: $inputfile"
-    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01"
+    
     $token = (run-azcmd "az account get-access-token" -deserialize $false | convertfrom-json).accessToken
     $template = (get-content -Path $inputfile | convertfrom-json)
-    despace-template ([ref]$template)
+    
     $pipeline = $pipeline.Replace(" ","_")
+    $uri = "https://management.azure.com/subscriptions/$sub/resourcegroups/$rg/providers/Microsoft.DataFactory/factories/$adf/pipelines/$($pipeline)?api-version=2018-06-01"
     $template.name = $pipeline
-    $body =  $template | convertto-json -depth 100
+
     $headers = @{}
     $headers["Authorization"] = "Bearer $token"
 
@@ -394,7 +419,7 @@ function Deploy-AdfPipeline {
                 rg             = $rg  
                 adf            = $adf
                 pipeline       = $reference
-                inputfile      = "$($fileobj.Directory.FullName)\$reference.json"
+                inputfile      = "$($fileobj.Directory.FullName)\$reference.json"  # Bug: the reference could live in a subfolder - or not.
                 donelist       = $donelist
             }
             $donelist
@@ -402,6 +427,11 @@ function Deploy-AdfPipeline {
             $donelist
         }
     }
+
+    despace-template ([ref]$template)
+    unpin-shir ([ref]$template)
+    $body =  $template | convertto-json -depth 100
+
     if($donelist -notcontains $pipeline)
     {
         Log "Callling REST method: $uri"
@@ -415,6 +445,7 @@ function Deploy-AdfPipeline {
             $message = $_.Exception
             Log $message -ForegroundColor Red
             throw "$message"
+            $body
         }
     }
 }
@@ -796,3 +827,4 @@ function restore-factory($sub, $rg, $srcfile, $name = "", $region = "", $exists 
         Deploy-AdfTrigger -sub $subscription -rg $resourceGroup -adf "$($factory.name)$suffix" -trigger $trigger.BaseName -inputfile $trigger.FullName
     }#>
 }
+
