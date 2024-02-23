@@ -1,4 +1,4 @@
-﻿function Convert-toWAV {
+function Convertto-WAV {
 param(
     [Parameter(Mandatory=$true)]
     [string] $srcfile
@@ -19,7 +19,7 @@ param(
     $vlcparams = " -I dummy -vvv --sout=`"#transcode{vcodec=none,acodec=s16l,ab=128,channels=2,samplerate=16000}:std{access=file,mux=wav,dst='$($file.DirectoryName)\$($file.BaseName).wav'}`" `"$($file.FullName)`" vlc://quit"
     #TODO: check vlc return code for success/failure, throw exception/error
     Start-Process -FilePath $vlcpath -ArgumentList $vlcparams -Wait
-    return '$($file.DirectoryName)\$($file.BaseName).wav'
+    return "$($file.DirectoryName)\$($file.BaseName).wav"
 }
 
 function Transcribe-Wav {
@@ -27,23 +27,24 @@ param(
     [Parameter(Mandatory=$true)]
     [string] $srcfile,
     [Parameter(Mandatory=$true)]
-    [string] $containerSAS,
-    [Parameter(Mandatory=$true)]
-    [string] $storageSAS,
-    [Parameter(Mandatory=$true)]
-    [string] $storageAcct,
+    [string] $storageAccount,
     [Parameter(Mandatory=$true)]
     [string] $container,
     [Parameter(Mandatory=$true)]
     [string] $ocpKey,
+    [Parameter(Mandatory=$false)]
+    [string] $locale,
     [Parameter(Mandatory=$true)]
-    [string] $locale = "en-US",
-    [Parameter(Mandatory=$true)]
-    [string] $resourcegroupname
+    [string] $resourcegroupname,
+    [Parameter(Mandatory=$false)]
+    [string] $upload = $true
     )
 
+    $fileobj = get-item -path $srcfile
 
-    $storageacctobj = get-azstorageaccount -resourcegroupname $resourcegroupname -name $storageAcct
+    $storageacctobj = get-azstorageaccount -resourcegroupname $resourceGroupName -name $storageAccount
+
+    
 
     $Headers = @{
     'Ocp-Apim-Subscription-Key' = $ocpKey;
@@ -51,51 +52,86 @@ param(
     'Content-type' = 'application/x-www-form-urlencoded'
     }
 
-    #$OAuthToken = Invoke-RestMethod -Uri https://centralus.api.cognitive.microsoft.com/sts/v1.0/issuetoken -Method Post -Headers $headers
 
     #upload to blob storage
-    set-azstorageblobcontent -file "$($file.DirectoryName)\$($file.BaseName).wav" -blob "$($file.BaseName).wav" -container audiofiles -context $storageacct.Context -Force -ClientTimeoutPerRequest 1800000 -ServerTimeoutPerRequest 1800000
-
-$transcriptionBody = @"
+    if($upload -eq $true)
     {
-      "locale": $locale,
-      "displayName": "$SrcFile $OcpKey $locale",
-      "contentUrls": [
-        "https://skunkworksdiag.blob.core.windows.net/audiofiles/Khranetali - Soviet LOTR.wav$SAStoken"
-      ],
-      "properties": {
-        "diarizationEnabled": false,
-        "wordLevelTimestampsEnabled": false,
-        "punctuationMode": "DictatedAndAutomatic",
-        "profanityFilterMode": "None "
+        $blob = set-azstorageblobcontent -file $srcfile -blob "$($file.BaseName).wav" -container $container -context $storageacctobj.Context -Force -ClientTimeoutPerRequest 1800000 -ServerTimeoutPerRequest 1800000
+    }
+    else
+    {
+        $blob = get-azstorageblob -Blob "$($file.BaseName).wav" -container $container -context $storageacctobj.Context 
+    }
+    $StartTime = Get-Date
+    $EndTime = $startTime.AddHours(8)
+    $CSASToken = New-AzStorageBlobSASToken -Container $container -Blob $fileobj.Name -Permission rwd -StartTime $StartTime -ExpiryTime $EndTime -context $storageacctobj.Context -Protocol HttpsOrHttp
+    write-host "Attempting transcription of blob $($blob.ICloudBlob.StorageUri.PrimaryUri)$CSASToken" -ForegroundColor Green
+
+
+    
+
+$transcriptionBody = @{
+     "contentUrls" = @("$($blob.ICloudBlob.StorageUri.PrimaryUri)$CSASToken")
+      "locale" = $locale
+      "displayName" = "test $locale"
+      #"model": null,
+      "properties" = @{
+        "wordLevelTimestampsEnabled" = "false"
+        "punctuationMode" = "DictatedAndAutomatic"
+        "profanityFilterMode" = "None"
+        }
       }
+
+
+    write-host "Dumping payload to API: "
+    write-host ($transcriptionbody | convertto-json)
+
+    $transcriptionheaders = @{
+        "Ocp-Apim-Subscription-Key" = "$ocpKey";
+        "Content-type" = "application/json";        
     }
 
-"@
+    $transcriptionheaders
 
-$transcriptionheaders = @{
-        "Ocp-Apim-Subscription-Key" = "$key1";
-        "content-type" = "application/json";
-        "content-length" = $transcriptionBody.Length
+
+
+$jobheaders = @{
+        "Ocp-Apim-Subscription-Key" = "$ocpKey";
     }
 
-    $batchURI = "https://centralus.api.cognitive.microsoft.com/speechtotext/v3.0/transcriptions"
+    $batchURI = "https://eastus.api.cognitive.microsoft.com/speechtotext/v3.1/transcriptions"
 
-    $joburi = (Invoke-WebRequest -Method POST -Uri $batchURI -Headers $Headers -Body $transcriptionbody | convertfrom-json)
+
+    try
+    {
+        $joburi = (Invoke-WebRequest -Method POST -Uri $batchURI -Headers $transcriptionheaders -Body ($transcriptionbody | convertto-json))  #need to switch to pscore so we can use -EscapeHandling 
+        $joburi = ($joburi | convertfrom-json).self
+    }
+    catch
+    {
+        $_.Exception.Message
+        $_.FullyQualifiedErrorId
+        $_.ErrorDetails
+        return
+    }
+
 
     start-sleep -Seconds 120
 
-    $status = ((Invoke-WebRequest -Method GET -Uri $joburi  -Headers $transcriptionheaders).Content | convertfrom-json)
+    Write-Host "Checking on job URI for completion: $joburi"
+    $status = ((Invoke-WebRequest -Method GET -Uri $joburi  -Headers $jobheaders).Content | convertfrom-json).status
 
     #if exception handling is proper, we should be in a running state.
     while($status -eq "Running" -and $status -ne "Failed")
     {
+        $status = ((Invoke-WebRequest -Method GET -Uri $joburi  -Headers $jobheaders).Content | convertfrom-json).status
+
         start-sleep -seconds 120
     }
 
     #download files...
     $downloaduri = "$joburi/files"
-    (Invoke-WebRequest -Method GET -Uri $downloaduri  -Headers $transcriptionheaders).Content
+    return (Invoke-WebRequest -Method GET -Uri $downloaduri  -Headers $transcriptionheaders).Content
 }
 
 function Translate-Text {
@@ -347,6 +383,7 @@ param(
     return $responseobj.translations[0].Text
 }
 
+<#
 Export-ModuleMember -Function Transcribe-Wav
 Export-ModuleMember -Function Convert-toWAV
 Export-ModuleMember -Function Convert-toMP3
@@ -355,3 +392,4 @@ Export-ModuleMember -Function Translate-Text
 Export-ModuleMember -Function transtime-totimespan
 Export-ModuleMember -Function timespanto-SRTTime
 Export-ModuleMember -Function translate-string
+#>
