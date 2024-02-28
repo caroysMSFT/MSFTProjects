@@ -28,9 +28,9 @@ function get-availablemetrics($resourceid)
 if([string]::IsNullOrEmpty($proxyresource))
 {
     Write-host "Proxy resource not used; using first resource to pull list of metrics:" -ForegroundColor Green
-    Write-Host $vms[0] -ForegroundColor Green
+    Write-Host $ResourceList[0] -ForegroundColor Green
     # Get the first resource to use it to pull the list of metrics
-    $metrics = get-availablemetrics -resourceid $vms[0]
+    $metrics = get-availablemetrics -resourceid $ResourceList[0]
 }
 else
 {
@@ -40,42 +40,42 @@ else
 }
 
 
-$vmdash = get-content ".\Dashboard Templates\dashboard.json" | convertfrom-json 
+$resourcedash = get-content ".\Dashboard Templates\dashboard.json" | convertfrom-json 
 
 $graphcount = 0
 
 foreach($metric in $metrics)
 {
-    $vmpart = get-content ".\Dashboard Templates\resourcepart.json" | convertfrom-json
-    #Add a new graph to the Part element using the VMPart JSON
+    $resourcepart = get-content ".\Dashboard Templates\resourcepart.json" | convertfrom-json
+    #Add a new graph to the Part element using the resourcepart JSON
 
-    $templatePart = $vmpart.metadata.settings.content.options.chart.metrics[0]
+    $templatePart = $resourcepart.metadata.settings.content.options.chart.metrics[0]
 
-    $vmpart.metadata.settings.content.options.chart.metrics = @() 
+    $resourcepart.metadata.settings.content.options.chart.metrics = @() 
 
-    foreach($vm in $vms)
+    foreach($resource in $ResourceList)
     {
         #this double conversion needed because pscustomobject.copy() method does shallow copy, and we end up updating by reference still on sub-properties
-        #practically, this means - the last VM in the list ends up in every entry
-        $vmpart2 = $templatePart | convertto-json | convertfrom-json 
+        #practically, this means - the last resource in the list ends up in every entry
+        $resourcepart2 = $templatePart | convertto-json | convertfrom-json 
 
-        $vmpart2.resourceMetadata.id = $vm
-        $vmpart2.name =  $metric
-        $vmpart2.namespace = "$($vm.split("/")[6])/$($vm.split("/")[7])"
-        $vmpart2.metricVisualization.displayName =  $metric
-        $vmpart.metadata.settings.content.options.chart.metrics += $vmpart2
+        $resourcepart2.resourceMetadata.id = $resource
+        $resourcepart2.name =  $metric
+        $resourcepart2.namespace = "$($resource.split("/")[6])/$($resource.split("/")[7])"
+        $resourcepart2.metricVisualization.displayName =  $metric
+        $resourcepart.metadata.settings.content.options.chart.metrics += $resourcepart2
     }
 
     # 3 graphs across, with the template's 6x4 block dimensions
     $xcoord = ($graphcount * 6) % 18
     $ycoord = [math]::truncate($graphcount  / 3)  * 4
 
-    $vmpart.position.x = $xcoord
-    $vmpart.position.y = $ycoord
-    $vmpart.metadata.settings.content.options.chart.title = "$metric by VM"
+    $resourcepart.position.x = $xcoord
+    $resourcepart.position.y = $ycoord
+    $resourcepart.metadata.settings.content.options.chart.title = "$metric by Resource"
 
 
-    $vmdash.properties.lenses.'0'.parts | add-member -Name $graphcount.tostring() -Value $vmpart -MemberType NoteProperty
+    $resourcedash.properties.lenses.'0'.parts | add-member -Name $graphcount.tostring() -Value $resourcepart -MemberType NoteProperty
 
     $graphcount++
 }
@@ -85,10 +85,10 @@ if(get-item -Path $outputfile)
     remove-item $outputfile
 }
 
-$vmdash.name = $DashboardName
-$vmdash.tags.'hidden-title' = $DashboardName
+$resourcedash.name = $DashboardName
+$resourcedash.tags.'hidden-title' = $DashboardName
 
-$vmdash | convertto-json -compress  -Depth 100 >> $outputfile
+$resourcedash | convertto-json -compress  -Depth 100 >> $outputfile
 
 if($OpenNotepad)
 {
